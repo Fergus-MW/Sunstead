@@ -122,6 +122,78 @@ These are settled by the research pass — call them out so we don't relitigate:
 
 ---
 
+## 3.5 Aiven MCP-native architecture (challenge alignment) ★
+
+> The Aiven challenge explicitly rewards **MCP-native agent ↔ data-infra interaction** and explicitly penalises building
+> "thousands of lines of backend boilerplate" between an agent and a database/queue. Our current `central-kg-api` HTTP
+> layer is exactly that anti-pattern if the *agents* call it. This section is the realignment that lets us win the
+> Aiven category without throwing the existing work away. **Treat this as binding** — every subsequent section that
+> says "agent calls KG API" should be read as "agent calls Aiven MCP, the FastAPI is for the FE only."
+
+**What needs to change to actually attack the challenge well:**
+
+1. **Re-route the agent → KG path through Aiven MCP, not our HTTP API.** Listener and workers issue `postgres_query`
+   MCP calls for: *"fetch the 2-hop neighborhood of `meeting:standup-2026-06-25`"*, *"insert `mentions` edge between
+   utterance N and function X"*, *"pgvector similarity over `nodes.embedding`"*. Recursive CTEs run as plain SQL through
+   the MCP — no FastAPI hop. Our Lambda becomes the *write enrichment* path (Claude extraction → upsert), not the
+   read path.
+
+2. **Kafka via Aiven MCP for the agent suite.** Listener publishes to `agent.tasks.*`, workers subscribe via MCP
+   `kafka_consume` tool, results back on `agent.results`. This is the highest-leverage architectural change for the demo.
+
+3. **Provision the remaining Aiven services via MCP, on camera / in commits.** Kafka cluster + OpenSearch via Aiven
+   MCP tool calls during the build, not `avn` CLI. That's the visible evidence judges will look for. The Postgres
+   service is already up (provisioned via `avn` before this realignment) — leave it; do every *next* service via MCP
+   and document the tool calls in the commit message.
+
+4. **Reframe `central-kg-api`'s purpose.** Keep it as:
+   1. **Claude extraction worker** that turns transcripts into graph upserts (called from the Listener over Kafka, or
+      invoked directly during seeding — *not* hit by other agents for context reads).
+   2. **The `seed` CLI** from §9.3 (tree-sitter + git → bulk upsert), where per-row MCP roundtrips would be too slow.
+   3. **A thin HTTP wrapper for the FE only** — the browser cannot speak MCP, so the gateway translates `HTTP / WS`
+      into the same MCP tool calls the agents use. This is *also* where demo-data seeding endpoints live (`POST
+      /demo/seed`) so the demo can be re-armed in one click without leaving the UI.
+
+   Demote it from "central context API the agents call" to **"ingestion sidecar + FE bridge."**
+
+### What this means for OpenSearch ↔ knowledge graph wiring
+
+OpenSearch is a separate Aiven service; nothing auto-syncs from Postgres. The connection is **a shared id**:
+`opensearch._id == nodes.id (UUID)` and `opensearch._id == sources.id (UUID)`. The chosen approach is **dual-write at
+upsert time, via MCP**:
+
+- When the Listener (or the seed CLI, or any worker) upserts a node/source, it issues *two* MCP calls in the same
+  turn: `postgres_query("INSERT INTO nodes ...")` **and** `opensearch_index({index: "kg-text", id: <node.id>,
+  body: {type, name, text, source_id, ...}})`. No connector code, no Debezium, no Python "syncer" service.
+- `quicksearch(q)` is then a single MCP `opensearch_search` call → returns ids → the agent follows up with a
+  `postgres_query` for the 1- or 2-hop neighborhood of those ids. The KG provides *structure*, OpenSearch provides
+  *full-text recall*. Same primary keys mean we never need a join table.
+- The seed CLI is the one place this *does* need code, because we're upserting thousands of nodes and per-row
+  MCP roundtrips would be slow. The seed CLI does the dual-write itself (bulk `psql COPY` + OpenSearch `_bulk`).
+  Everything else (live meeting writes, ad-hoc upserts from agents) goes through MCP.
+
+**Net: no dedicated "OpenSearch connector" code is needed.** OpenSearch ↔ KG is held together by id equality and
+discipline at write time, both of which we get for free as long as every writer goes through MCP.
+
+### What this means for the FE / demo
+
+We still need a browser-facing layer (the Meet wrapper + overlay can't speak MCP, and the agents shouldn't expose
+Kafka credentials to the browser). That's exactly what `central-kg-api` becomes:
+
+- **`GET /demo/*`** — demo-data endpoints the FE uses to bootstrap a clean state (`POST /demo/seed` re-runs a
+  canned ingest; `POST /demo/reset` wipes the graph). Cheap to add, lets us re-arm the demo without leaving the UI.
+- **`POST /ingest`** — kept; this is what the FE calls when a user pastes a doc or kicks off the seed.
+- **WebSocket bridge** — the FE subscribes here; the gateway tails `meeting.transcript` / `agent.results` over the
+  Aiven Kafka MCP and pushes events into the WS so the browser sees the live feed.
+- **No `/query`, `/entity`, `/subgraph` traffic from agents.** Those routes can stay for the FE's "explore the graph"
+  view, but they should NOT be the canonical path for any agent — agents go through MCP.
+
+So: the FastAPI service shrinks in *scope* (agents stop calling it) but grows in *value* (it's the demo-experience
+surface). That's the right framing for the judges: **"our agents talk to data via MCP; our humans talk to agents via
+this FastAPI."**
+
+---
+
 ## 4. Architectural recommendation — "FE calls agent BE; or a better way?"
 
 Your instinct (FE → agent backend) is right. The refinement that makes it scale to *N agents + barge-in + a reviewer
