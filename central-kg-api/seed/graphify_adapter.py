@@ -63,15 +63,15 @@ def map_node(n: dict[str, Any]) -> NodeRow:
     explicit_type = n.get("type")  # graphify rarely sets this; respect it when present
     our_type = explicit_type or NODE_TYPE_FOR_FILE_TYPE.get(file_type, "topic")
 
-    # Canonical name: code nodes use their source path so that e.g. two
-    # `__init__.py` files in different directories don't collide on the
-    # `(type, lower(name))` unique index. The human-readable `label` is kept
-    # in properties.label. Non-code nodes don't have a meaningful path, so
-    # they fall back to label / id.
+    # Canonical name: code nodes use "<source_file>:<label>" so functions
+    # share neither file-only nor label-only collisions — the same `__init__`
+    # method in two different classes stays distinct, and so does the same
+    # function name appearing in two files. The bare human label is kept in
+    # properties.label for display. Non-code nodes fall back to label / id.
     label = n.get("label") or n.get("norm_label") or n.get("id")
     source_file = n.get("source_file")
-    if file_type == "code" and source_file:
-        name = source_file
+    if file_type == "code" and source_file and label:
+        name = f"{source_file}:{label}"
     else:
         name = label or n.get("id") or "(unnamed)"
 
