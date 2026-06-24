@@ -1,8 +1,8 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #1a0b2e;
+  --foreground: #fef3c7;
 }
 
 @theme inline {
@@ -12,15 +12,85 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+}
+
+/* ───────────── Lava lamp ───────────── */
+
+@keyframes lava-morph-a {
+  0%,
+  100% {
+    border-radius: 62% 38% 54% 46% / 48% 52% 48% 52%;
+    transform: translate(-10%, -8%) rotate(0deg) scale(1);
+  }
+  33% {
+    border-radius: 38% 62% 41% 59% / 60% 40% 60% 40%;
+    transform: translate(8%, 12%) rotate(120deg) scale(1.08);
+  }
+  66% {
+    border-radius: 54% 46% 64% 36% / 36% 62% 38% 64%;
+    transform: translate(-4%, 10%) rotate(240deg) scale(0.94);
+  }
+}
+
+@keyframes lava-morph-b {
+  0%,
+  100% {
+    border-radius: 40% 60% 65% 35% / 55% 45% 55% 45%;
+    transform: translate(12%, -4%) rotate(0deg) scale(1.05);
+  }
+  50% {
+    border-radius: 68% 32% 38% 62% / 42% 58% 42% 58%;
+    transform: translate(-12%, 14%) rotate(180deg) scale(0.9);
+  }
+}
+
+@keyframes lava-morph-c {
+  0%,
+  100% {
+    border-radius: 55% 45% 38% 62% / 60% 40% 60% 40%;
+    transform: translate(-6%, 18%) rotate(0deg) scale(0.95);
+  }
+  50% {
+    border-radius: 35% 65% 62% 38% / 40% 60% 40% 60%;
+    transform: translate(14%, -16%) rotate(-180deg) scale(1.12);
+  }
+}
+
+@keyframes sun-pulse {
+  0%,
+  100% {
+    box-shadow:
+      0 0 80px 20px rgba(254, 215, 170, 0.5),
+      0 0 200px 60px rgba(251, 146, 60, 0.3);
+  }
+  50% {
+    box-shadow:
+      0 0 120px 40px rgba(254, 215, 170, 0.7),
+      0 0 280px 100px rgba(251, 146, 60, 0.45);
+  }
+}
+
+.lava-blob {
+  position: absolute;
+  filter: blur(40px);
+  mix-blend-mode: screen;
+  will-change: transform, border-radius;
+}
+
+.lava-a {
+  animation: lava-morph-a 18s ease-in-out infinite;
+}
+.lava-b {
+  animation: lava-morph-b 22s ease-in-out infinite;
+}
+.lava-c {
+  animation: lava-morph-c 26s ease-in-out infinite;
+}
+
+.midnight-sun {
+  animation: sun-pulse 6s ease-in-out infinite;
 }
