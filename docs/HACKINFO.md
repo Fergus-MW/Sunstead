@@ -87,9 +87,11 @@ immediately after announcement. → Have a tight 4-min pitch + working demo read
 ## Strategy: how Sunstead maps to the rubric
 
 1. **Make MCP the spine, not a side-call (34%).** Per [PLAN.md §3.5]: agent→data goes through Aiven MCP
-   (`postgres_query`, `kafka_consume`/publish, `opensearch_*`). Our `agent-system/shared/kafka.py` +
-   `kg_client.py` direct clients are the *pre-realignment* approach — the agent path should move to MCP; keep
-   real clients only where latency forces it (e.g. the high-rate transcript stream from `call-gateway`).
+   (`aiven_pg_read`/`aiven_pg_write`, `aiven_kafka_topic_message_produce`; OpenSearch tools unverified). Our
+   `agent-system/shared/kafka.py` + `kg_client.py` direct clients are the *pre-realignment* approach — the agent path
+   moves to MCP via the Anthropic Messages-API remote MCP connector. The one unavoidable direct hop is **inbound**:
+   our Lambda workers are triggered by an AWS Kafka event-source mapping (a Lambda can't run a consumer loop), and the
+   transcript firehose stays a direct client on the teammate's EC2. Every agent *data operation* is MCP.
 2. **Show autonomy on camera (33%).** Provision the *next* Aiven service (Kafka, OpenSearch) via MCP tool calls
    during the build and capture it; note the tool calls in commit messages. Judges look for visible evidence that
    backend wiring was abstracted away.

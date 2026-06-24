@@ -122,6 +122,112 @@ These are settled by the research pass — call them out so we don't relitigate:
 
 ---
 
+## 3.5 Aiven MCP-native architecture (challenge alignment) ★
+
+> The Aiven challenge explicitly rewards **MCP-native agent ↔ data-infra interaction** and explicitly penalises building
+> "thousands of lines of backend boilerplate" between an agent and a database/queue. Our current `central-kg-api` HTTP
+> layer is exactly that anti-pattern if the *agents* call it. This section is the realignment that lets us win the
+> Aiven category without throwing the existing work away. **Treat this as binding** — every subsequent section that
+> says "agent calls KG API" should be read as "agent calls Aiven MCP, the FastAPI is for the FE only."
+
+> **Verified tool names** (this section originally used placeholders). The real Aiven MCP data-plane tools, confirmed
+> against [aiven.io/mcp](https://aiven.io/mcp) + [Aiven-Open/mcp-aiven](https://github.com/Aiven-Open/mcp-aiven):
+> `aiven_pg_read` / `aiven_pg_write` (SQL incl. recursive CTEs + pgvector), `aiven_kafka_topic_message_produce` /
+> `aiven_kafka_topic_message_list`. OpenSearch data-plane tools are **unverified** — treat OpenSearch-via-MCP as a
+> stretch (pgvector is the primary retrieval path). Agents reach these via the **Anthropic Messages API remote MCP
+> connector** (no Agent-SDK subprocess). See [AGENT_SYSTEM.md](AGENT_SYSTEM.md) §2 for the agent-suite specifics.
+
+**What needs to change to actually attack the challenge well:**
+
+1. **Re-route the agent → KG path through Aiven MCP, not our HTTP API.** Listener and workers issue `aiven_pg_read` /
+   `aiven_pg_write` MCP calls for: *"fetch the 2-hop neighborhood of `meeting:standup-2026-06-25`"*, *"insert
+   `mentions` edge between utterance N and function X"*, *"pgvector similarity over `nodes.embedding`"*. Recursive CTEs
+   run as plain SQL through the MCP — no FastAPI hop. Our Lambda becomes the *write enrichment* path (Claude
+   extraction → upsert), not the read path.
+
+2. **Kafka via Aiven MCP for the agent suite.** Listener publishes to `agent.tasks.*`; workers produce results back on
+   `agent.results` via `aiven_kafka_topic_message_produce`. *Consumption* depends on the host: an EC2/long-running
+   worker can poll `aiven_kafka_topic_message_list`, but our **Lambda** workers are triggered by an AWS Kafka
+   event-source mapping (the managed poller *is* the consumer — see [AGENT_SYSTEM.md](AGENT_SYSTEM.md) §2/§4). Either
+   way, every data *operation* stays on MCP.
+
+3. **Provision the remaining Aiven services via MCP, on camera / in commits.** Kafka cluster + OpenSearch via Aiven
+   MCP tool calls during the build, not `avn` CLI. That's the visible evidence judges will look for. The Postgres
+   service is already up (provisioned via `avn` before this realignment) — leave it; do every *next* service via MCP
+   and document the tool calls in the commit message.
+
+4. **Reframe `central-kg-api`'s purpose.** Keep it as:
+   1. **Claude extraction worker** that turns transcripts into graph upserts (called from the Listener over Kafka, or
+      invoked directly during seeding — *not* hit by other agents for context reads).
+   2. **The `seed` CLI** from §9.3 (tree-sitter + git → bulk upsert), where per-row MCP roundtrips would be too slow.
+   3. **A thin HTTP wrapper for the FE only** — the browser cannot speak MCP, so the gateway translates `HTTP / WS`
+      into the same MCP tool calls the agents use. This is *also* where demo-data seeding endpoints live (`POST
+      /demo/seed`) so the demo can be re-armed in one click without leaving the UI.
+
+   Demote it from "central context API the agents call" to **"ingestion sidecar + FE bridge."**
+
+### What this means for OpenSearch ↔ knowledge graph wiring
+
+OpenSearch is a separate Aiven service; nothing auto-syncs from Postgres. The connection is **a shared id**:
+`opensearch._id == nodes.id (UUID)` and `opensearch._id == sources.id (UUID)`. The chosen approach is **dual-write at
+upsert time, via MCP**:
+
+- When the Listener (or the seed CLI, or any worker) upserts a node/source, it issues *two* MCP calls in the same
+  turn: `aiven_pg_write("INSERT INTO nodes ...")` **and** an OpenSearch index call (tool name *unverified* — see the
+  note at the top of this section; if Aiven MCP exposes no OpenSearch data-plane tool, the seed CLI handles the
+  OpenSearch write and live agents skip it). No connector code, no Debezium, no Python "syncer" service.
+- `quicksearch(q)` is then a single OpenSearch search call (again, *if* exposed via MCP) → returns ids → the agent
+  follows up with an `aiven_pg_read` for the 1- or 2-hop neighborhood of those ids. The KG provides *structure*,
+  OpenSearch provides *full-text recall*. Same primary keys mean we never need a join table.
+- The seed CLI is the one place this *does* need code, because we're upserting thousands of nodes and per-row
+  MCP roundtrips would be slow. The seed CLI does the dual-write itself (bulk `psql COPY` + OpenSearch `_bulk`).
+  Everything else (live meeting writes, ad-hoc upserts from agents) goes through MCP.
+
+**Net: no dedicated "OpenSearch connector" code is needed.** OpenSearch ↔ KG is held together by id equality and
+discipline at write time, both of which we get for free as long as every writer goes through MCP.
+
+### What this means for the FE / demo
+
+We still need a browser-facing layer (the Meet wrapper + overlay can't speak MCP, and the agents shouldn't expose
+Kafka credentials to the browser). That's exactly what `central-kg-api` becomes:
+
+- **`GET /demo/*`** — demo-data endpoints the FE uses to bootstrap a clean state (`POST /demo/seed` re-runs a
+  canned ingest; `POST /demo/reset` wipes the graph). Cheap to add, lets us re-arm the demo without leaving the UI.
+- **`POST /ingest`** — kept; this is what the FE calls when a user pastes a doc or kicks off the seed.
+- **WebSocket bridge** — the FE subscribes here; the gateway tails `meeting.transcript` / `agent.results` over the
+  Aiven Kafka MCP and pushes events into the WS so the browser sees the live feed.
+- **No `/query`, `/entity`, `/subgraph` traffic from agents.** Those routes can stay for the FE's "explore the graph"
+  view, but they should NOT be the canonical path for any agent — agents go through MCP.
+
+So: the FastAPI service shrinks in *scope* (agents stop calling it) but grows in *value* (it's the demo-experience
+surface). That's the right framing for the judges: **"our agents talk to data via MCP; our humans talk to agents via
+this FastAPI."**
+
+---
+
+## 3.6 Deployment topology (where each piece runs)
+
+The system is **multi-host by design** — serverless where work is per-task and bursty, always-on where a process
+must hold open connections. (Agent-suite specifics: [AGENT_SYSTEM.md](AGENT_SYSTEM.md) §3.)
+
+| Component | Host | Why |
+|---|---|---|
+| **Worker agents** (web / data / git) | **AWS Lambda** | Per-task, stateless, bursty. Triggered by an **Aiven Kafka event-source mapping** (AWS-managed poller invokes the function with a batch). Each runs the **Anthropic Messages API + remote Aiven MCP connector** — no Agent-SDK/CLI subprocess, so the package stays pure-Python. |
+| **API / FE gateway** | **always-on** (small Fargate / EC2 / Cloud Run) | Holds long-lived WebSockets + a continuous Kafka tail → not Lambda-shaped. (Alt: API Gateway WebSocket API + DynamoDB.) |
+| **central-kg-api** | **AWS Lambda** (Mangum) | Already serverless. Ingestion sidecar + FE bridge; off the agent read path. |
+| **Frontend** | **Vercel** | Meet overlay + agent-activity feed; talks only to the gateway. |
+| **Listener (A) + Call gateway** | **EC2** | Close to the live call; persistent Recall/Soniox connections. |
+| **Aiven** (Postgres+pgvector, Kafka, OpenSearch) | **Aiven cloud** | Data layer. Reached **only via Aiven MCP** from agents. |
+
+**The one MCP-vs-direct exception, made explicit:** a Lambda can't run a Kafka consumer loop, so worker *ingest* is
+the AWS-native event-source mapping, not an MCP `aiven_kafka_topic_message_list` call. Every data *operation* an
+agent performs (KG read/write, result/fact emit) still goes through Aiven MCP — which is what the 34% MCP-depth
+criterion measures. **Open risk:** the Aiven *hosted* MCP (`mcp.aiven.live`) documents OAuth-PKCE auth; headless
+Lambda needs a static bearer for the Messages-API connector. If unavailable, self-host `npx mcp-aiven` beside the
+gateway. Verify first — see [AGENT_SYSTEM.md](AGENT_SYSTEM.md) §11.
+
+---
+
 ## 4. Architectural recommendation — "FE calls agent BE; or a better way?"
 
 Your instinct (FE → agent backend) is right. The refinement that makes it scale to *N agents + barge-in + a reviewer
@@ -292,8 +398,11 @@ reviewer agent and `agent.reasoning` barge-in (stretch).
 
 ## 8. The Agent Suite (workers)
 
-Common shape: each worker is a **Kafka consumer** on its `agent.tasks.<x>` topic that runs a Claude Agent SDK agent per
-task and publishes to `agent.results`. Each task → one SDK session (stateless, horizontally scalable).
+Common shape: each worker consumes its `agent.tasks.<x>` topic, runs **one Anthropic Messages-API session with the
+Aiven MCP connector** per task, and publishes to `agent.results` via MCP. Stateless and horizontally scalable. On our
+chosen hosting these are **AWS Lambda** functions triggered by an Aiven Kafka event-source mapping — see
+[AGENT_SYSTEM.md](AGENT_SYSTEM.md) §2–§4 and §3.6 above. (We deliberately avoid the Agent-SDK CLI-subprocess model on
+Lambda; the listener on EC2 may still use it.)
 
 ### 8.1 Agent B — Web Agent → Vercel
 - **Intent vocab:** `build_website`, `update_website`.
