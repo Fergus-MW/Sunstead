@@ -1,8 +1,8 @@
 @import "tailwindcss";
 
 :root {
-  --background: #1a0b2e;
-  --foreground: #fef3c7;
+  --background: #0b1a17;
+  --foreground: #f3ead3;
 }
 
 @theme inline {
@@ -18,79 +18,87 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
-/* ───────────── Lava lamp ───────────── */
+/* ── Midnight-sun orbit ─────────────────────────────────────────── */
 
-@keyframes lava-morph-a {
+/*
+ * The sun never sets. It traces a flat elliptical orbit just above the
+ * horizon: dips low at "noon" and "midnight" (the two horizon kisses)
+ * and climbs at quarter-points.
+ */
+@keyframes sun-orbit {
+  0% {
+    left: 6%;
+    bottom: 26%;
+  }
+  25% {
+    left: 32%;
+    bottom: 58%;
+  }
+  50% {
+    left: 88%;
+    bottom: 26%;
+  }
+  75% {
+    left: 58%;
+    bottom: 58%;
+  }
+  100% {
+    left: 6%;
+    bottom: 26%;
+  }
+}
+
+@keyframes sun-morph {
   0%,
   100% {
-    border-radius: 62% 38% 54% 46% / 48% 52% 48% 52%;
-    transform: translate(-10%, -8%) rotate(0deg) scale(1);
+    border-radius: 52% 48% 46% 54% / 50% 52% 48% 50%;
   }
   33% {
-    border-radius: 38% 62% 41% 59% / 60% 40% 60% 40%;
-    transform: translate(8%, 12%) rotate(120deg) scale(1.08);
+    border-radius: 44% 56% 58% 42% / 56% 44% 56% 44%;
   }
   66% {
-    border-radius: 54% 46% 64% 36% / 36% 62% 38% 64%;
-    transform: translate(-4%, 10%) rotate(240deg) scale(0.94);
+    border-radius: 60% 40% 42% 58% / 44% 60% 40% 56%;
   }
 }
 
-@keyframes lava-morph-b {
+@keyframes sun-glow {
   0%,
   100% {
-    border-radius: 40% 60% 65% 35% / 55% 45% 55% 45%;
-    transform: translate(12%, -4%) rotate(0deg) scale(1.05);
+    opacity: 0.85;
   }
   50% {
-    border-radius: 68% 32% 38% 62% / 42% 58% 42% 58%;
-    transform: translate(-12%, 14%) rotate(180deg) scale(0.9);
+    opacity: 1;
   }
 }
 
-@keyframes lava-morph-c {
-  0%,
-  100% {
-    border-radius: 55% 45% 38% 62% / 60% 40% 60% 40%;
-    transform: translate(-6%, 18%) rotate(0deg) scale(0.95);
-  }
-  50% {
-    border-radius: 35% 65% 62% 38% / 40% 60% 40% 60%;
-    transform: translate(14%, -16%) rotate(-180deg) scale(1.12);
-  }
-}
-
-@keyframes sun-pulse {
-  0%,
-  100% {
-    box-shadow:
-      0 0 80px 20px rgba(254, 215, 170, 0.5),
-      0 0 200px 60px rgba(251, 146, 60, 0.3);
-  }
-  50% {
-    box-shadow:
-      0 0 120px 40px rgba(254, 215, 170, 0.7),
-      0 0 280px 100px rgba(251, 146, 60, 0.45);
-  }
-}
-
-.lava-blob {
+.sun-orbit {
   position: absolute;
-  filter: blur(40px);
-  mix-blend-mode: screen;
-  will-change: transform, border-radius;
+  animation: sun-orbit 48s ease-in-out infinite;
+  will-change: left, bottom;
 }
 
-.lava-a {
-  animation: lava-morph-a 18s ease-in-out infinite;
-}
-.lava-b {
-  animation: lava-morph-b 22s ease-in-out infinite;
-}
-.lava-c {
-  animation: lava-morph-c 26s ease-in-out infinite;
+.sun-body {
+  position: relative;
+  width: 9rem;
+  height: 9rem;
+  background: radial-gradient(circle at 40% 35%, #fff6d8 0%, #ffd57a 40%, #f78f3f 75%, #c2410c 100%);
+  animation: sun-morph 14s ease-in-out infinite, sun-glow 6s ease-in-out infinite;
+  box-shadow:
+    0 0 80px 30px rgba(255, 196, 110, 0.45),
+    0 0 200px 80px rgba(247, 143, 63, 0.25);
+  will-change: border-radius, opacity;
 }
 
-.midnight-sun {
-  animation: sun-pulse 6s ease-in-out infinite;
+/* Slow reflective shimmer on the snow line */
+@keyframes shimmer {
+  0%,
+  100% {
+    opacity: 0.25;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+.shimmer {
+  animation: shimmer 5s ease-in-out infinite;
 }

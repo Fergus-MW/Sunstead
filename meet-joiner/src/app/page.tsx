@@ -8,14 +8,6 @@ type Status =
   | { kind: "joined"; meetingId: string }
   | { kind: "error"; message: string };
 
-const HORIZON_ART = String.raw`
-      ▲      ▲▲       ▲      ▲▲▲      ▲     ▲▲
-     ▲▲▲    ▲▲▲▲    ▲▲▲    ▲▲▲▲▲    ▲▲▲   ▲▲▲▲
-    ▲▲▲▲▲  ▲▲▲▲▲▲  ▲▲▲▲▲  ▲▲▲▲▲▲▲  ▲▲▲▲▲ ▲▲▲▲▲▲
- ══════════════════════════════════════════════════
- · · · · · · · · · · · · · · · · · · · · · · · · ·
-`;
-
 export default function Home() {
   const [link, setLink] = useState("");
   const [status, setStatus] = useState<Status>({ kind: "idle" });
@@ -44,40 +36,106 @@ export default function Home() {
   }
 
   return (
-    <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-gradient-to-b from-[#2a0f3d] via-[#5b1a3a] to-[#1a0b2e] px-6 text-amber-50">
-      {/* Lava-lamp morphing blobs */}
-      <div
-        aria-hidden
-        className="lava-blob lava-a left-[-10%] top-[-10%] h-[55vmax] w-[55vmax] bg-amber-400/70"
-      />
-      <div
-        aria-hidden
-        className="lava-blob lava-b right-[-15%] top-[10%] h-[50vmax] w-[50vmax] bg-rose-500/60"
-      />
-      <div
-        aria-hidden
-        className="lava-blob lava-c left-[10%] bottom-[-20%] h-[60vmax] w-[60vmax] bg-fuchsia-700/55"
-      />
-      <div
-        aria-hidden
-        className="lava-blob lava-a right-[5%] bottom-[-10%] h-[40vmax] w-[40vmax] bg-indigo-600/50"
-      />
+    <main className="relative flex min-h-screen flex-col overflow-hidden bg-gradient-to-b from-[#1d2e4a] via-[#3a3658] to-[#5a3d4a] text-[#f3ead3]">
+      {/* Orbiting liquid sun */}
+      <div className="sun-orbit z-0">
+        <div className="sun-body" />
+      </div>
 
-      {/* The midnight sun, never setting */}
-      <div
+      {/* Lapland landscape: layered pine forest */}
+      <svg
         aria-hidden
-        className="midnight-sun pointer-events-none absolute left-1/2 top-[18%] h-32 w-32 -translate-x-1/2 rounded-full bg-gradient-to-b from-amber-100 via-amber-300 to-orange-500"
-      />
+        viewBox="0 0 1440 420"
+        preserveAspectRatio="xMidYMax slice"
+        className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-[55vh] w-full"
+      >
+        <defs>
+          <linearGradient id="far-hill" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" stopColor="#2c4a3a" />
+            <stop offset="100%" stopColor="#1a3026" />
+          </linearGradient>
+          <linearGradient id="mid-forest" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" stopColor="#163025" />
+            <stop offset="100%" stopColor="#0c1f18" />
+          </linearGradient>
+          <linearGradient id="near-forest" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" stopColor="#0a1c14" />
+            <stop offset="100%" stopColor="#040b08" />
+          </linearGradient>
+          <linearGradient id="snow-line" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" stopColor="rgba(243,234,211,0.35)" />
+            <stop offset="100%" stopColor="rgba(243,234,211,0)" />
+          </linearGradient>
+        </defs>
 
-      <div className="relative z-10 w-full max-w-xl space-y-7 pt-24">
+        {/* Distant rolling hills */}
+        <path
+          d="M0 220 L60 200 L140 180 L240 200 L340 170 L440 195 L560 175 L680 200 L800 180 L920 205 L1040 175 L1160 200 L1280 185 L1380 205 L1440 195 L1440 420 L0 420 Z"
+          fill="url(#far-hill)"
+        />
+
+        {/* Subtle snow shimmer */}
+        <rect
+          x="0"
+          y="195"
+          width="1440"
+          height="35"
+          fill="url(#snow-line)"
+          className="shimmer"
+        />
+
+        {/* Midground pines */}
+        <g fill="url(#mid-forest)">
+          {Array.from({ length: 26 }).map((_, i) => {
+            const x = i * 58 + (i % 3) * 6;
+            const h = 60 + ((i * 7) % 40);
+            const w = 28 + ((i * 5) % 10);
+            return (
+              <polygon
+                key={`mid-${i}`}
+                points={`${x},${260 - h} ${x - w / 2},${260} ${x + w / 2},${260}`}
+              />
+            );
+          })}
+          <rect x="0" y="258" width="1440" height="40" />
+        </g>
+
+        {/* Foreground pines — taller, denser */}
+        <g fill="url(#near-forest)">
+          {Array.from({ length: 22 }).map((_, i) => {
+            const x = i * 70 + (i % 2) * 18;
+            const h = 110 + ((i * 13) % 70);
+            const w = 50 + ((i * 9) % 18);
+            const tipY = 340 - h;
+            // Three-tier pine: stack of triangles
+            return (
+              <g key={`near-${i}`}>
+                <polygon
+                  points={`${x},${tipY} ${x - w / 3},${tipY + h * 0.35} ${x + w / 3},${tipY + h * 0.35}`}
+                />
+                <polygon
+                  points={`${x},${tipY + h * 0.2} ${x - w / 2},${tipY + h * 0.65} ${x + w / 2},${tipY + h * 0.65}`}
+                />
+                <polygon
+                  points={`${x},${tipY + h * 0.45} ${x - w / 1.6},${tipY + h} ${x + w / 1.6},${tipY + h}`}
+                />
+              </g>
+            );
+          })}
+          <rect x="0" y="335" width="1440" height="85" />
+        </g>
+      </svg>
+
+      {/* Content */}
+      <div className="relative z-20 mx-auto flex w-full max-w-xl flex-1 flex-col justify-center px-6 pb-[40vh] pt-20">
         <div className="space-y-2 text-center">
-          <p className="text-[10px] uppercase tracking-[0.5em] text-amber-200/80">
+          <p className="text-[10px] uppercase tracking-[0.5em] text-[#f3ead3]/60">
             Sunstead · Lapland · 66°33′N
           </p>
-          <h1 className="font-serif text-3xl font-semibold tracking-tight text-amber-50 drop-shadow-[0_2px_20px_rgba(251,146,60,0.5)] sm:text-4xl">
+          <h1 className="font-serif text-3xl font-medium tracking-tight text-[#f3ead3] sm:text-4xl">
             The sun never sets on this meeting
           </h1>
-          <p className="text-sm italic text-amber-100/70">
+          <p className="text-sm italic text-[#f3ead3]/70">
             Paste a Google Meet link. We&apos;ll send an envoy across the
             tundra.
           </p>
@@ -85,7 +143,7 @@ export default function Home() {
 
         <form
           onSubmit={onSubmit}
-          className="space-y-3 rounded-2xl border border-amber-100/20 bg-black/30 p-4 shadow-[0_30px_80px_-20px_rgba(0,0,0,0.6)] backdrop-blur-xl"
+          className="mt-7 space-y-3 rounded-xl border border-[#f3ead3]/15 bg-black/30 p-4 backdrop-blur-md"
         >
           <input
             type="url"
@@ -93,50 +151,37 @@ export default function Home() {
             value={link}
             onChange={(e) => setLink(e.target.value)}
             placeholder="https://meet.google.com/abc-defg-hij"
-            className="w-full rounded-lg border border-amber-100/20 bg-black/30 px-3 py-2 text-sm text-amber-50 placeholder:text-amber-100/40 outline-none focus:border-rose-300 focus:ring-2 focus:ring-rose-400/40"
+            className="w-full rounded-md border border-[#f3ead3]/15 bg-black/40 px-3 py-2 text-sm text-[#f3ead3] placeholder:text-[#f3ead3]/35 outline-none focus:border-[#f3ead3]/60"
           />
           <button
             type="submit"
             disabled={status.kind === "joining" || !link}
-            className="w-full rounded-lg bg-gradient-to-r from-amber-400 via-rose-500 to-fuchsia-600 px-3 py-2.5 text-sm font-medium text-amber-50 shadow-[0_8px_30px_-5px_rgba(244,114,182,0.5)] transition-all hover:brightness-110 hover:shadow-[0_8px_40px_-5px_rgba(244,114,182,0.7)] disabled:cursor-not-allowed disabled:opacity-50"
+            className="w-full rounded-md bg-[#f3ead3] px-3 py-2 text-sm font-medium text-[#1d2e4a] transition-colors hover:bg-white disabled:cursor-not-allowed disabled:opacity-40"
           >
             {status.kind === "joining"
-              ? "Tracking your envoy across the tundra…"
-              : "Send the envoy ☼"}
+              ? "Sending envoy across the tundra…"
+              : "Send the envoy"}
           </button>
         </form>
 
         {status.kind === "joined" && (
-          <div className="rounded-xl border border-emerald-300/30 bg-emerald-500/10 p-4 text-center text-sm text-emerald-100 shadow backdrop-blur-md">
-            <pre
-              aria-hidden
-              className="mb-2 select-none whitespace-pre text-center text-[10px] leading-tight text-emerald-200/70"
-            >
-              {`  ╭─ aurora ─╮\n   〜〜〜〜〜〜\n  ╰──────────╯`}
-            </pre>
-            The envoy has reached the meeting hall.
-            <div className="mt-1 font-mono text-xs text-emerald-200/80">
+          <div className="mt-4 rounded-md border border-[#f3ead3]/20 bg-black/30 p-3 text-center text-sm text-[#f3ead3] backdrop-blur-md">
+            Envoy has reached the meeting hall.
+            <div className="mt-1 font-mono text-xs text-[#f3ead3]/60">
               meeting · {status.meetingId}
             </div>
           </div>
         )}
         {status.kind === "error" && (
-          <div className="rounded-xl border border-rose-300/30 bg-rose-500/10 p-3 text-center text-sm text-rose-100 shadow backdrop-blur-md">
-            ❄ {status.message}
+          <div className="mt-4 rounded-md border border-rose-300/30 bg-rose-900/30 p-3 text-center text-sm text-rose-100 backdrop-blur-md">
+            {status.message}
           </div>
         )}
-
-        <pre
-          aria-hidden
-          className="select-none whitespace-pre text-center text-[10px] leading-tight text-indigo-100/40 sm:text-xs"
-        >
-          {HORIZON_ART}
-        </pre>
-
-        <p className="text-center text-[10px] uppercase tracking-[0.3em] text-amber-100/50">
-          24h daylight · midnight sun · perpetual quorum
-        </p>
       </div>
+
+      <p className="relative z-20 mb-4 text-center text-[10px] uppercase tracking-[0.4em] text-[#f3ead3]/40">
+        24h daylight · midnight sun · perpetual quorum
+      </p>
     </main>
   );
 }
