@@ -15,8 +15,9 @@ class Settings(BaseSettings):
     anthropic_api_key: str | None = None
     anthropic_model: str = "claude-sonnet-4-6"
 
-    openai_api_key: str | None = None
-    embedding_model: str = "text-embedding-3-small"
+    # Embedding column kept in the schema for forward compatibility (Voyage,
+    # sentence-transformers, etc.) but no provider is wired up today —
+    # Anthropic does not ship an embeddings API.
     embedding_dim: int = 1536
 
     max_extract_tokens: int = 2048
