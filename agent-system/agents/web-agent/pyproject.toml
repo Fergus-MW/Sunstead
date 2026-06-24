@@ -1,0 +1,20 @@
+[project]
+name = "web-agent"
+version = "0.1.0"
+description = "Agent B: build/deploy websites to Vercel"
+requires-python = ">=3.11"
+dependencies = [
+    "shared",
+    "anthropic",
+    "httpx",
+]
+
+[tool.uv.sources]
+shared = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/web_agent"]
