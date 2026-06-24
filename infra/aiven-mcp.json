@@ -1,0 +1,14 @@
+{
+  "_comment": "Template for the Aiven MCP server entry in ~/.claude.json (user scope) or .mcp.json (project scope). Drop the AIVEN_TOKEN value in via env or fill it in for local-only configs. mcp-aiven server: https://aiven.io/docs/tools/mcp-server",
+  "mcpServers": {
+    "aiven-mcp": {
+      "command": "npx",
+      "args": ["-y", "mcp-aiven"],
+      "env": {
+        "AIVEN_TOKEN": "${AIVEN_TOKEN}",
+        "AIVEN_READ_ONLY": "false",
+        "AIVEN_ALLOW_SECRETS": "true"
+      }
+    }
+  }
+}
