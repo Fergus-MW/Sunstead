@@ -210,6 +210,35 @@ async def subgraph_bfs(
     return [_row_to_node(r) for r in nrows], [_row_to_edge(r) for r in erows]
 
 
+async def overview_centers(session: AsyncSession, limit: int = 12) -> list[UUID]:
+    """Seed an at-a-glance view from the most-connected nodes (graph hubs).
+
+    Falls back to most-recently-updated nodes when the graph has no edges yet.
+    """
+    deg_sql = text(
+        """
+        SELECT node_id FROM (
+            SELECT source_node_id AS node_id FROM edges
+            UNION ALL
+            SELECT target_node_id AS node_id FROM edges
+        ) z
+        GROUP BY node_id
+        ORDER BY count(*) DESC
+        LIMIT :limit
+        """
+    )
+    rows = (await session.execute(deg_sql, {"limit": limit})).all()
+    if rows:
+        return [r._mapping["node_id"] for r in rows]
+    recent = (
+        await session.execute(
+            text("SELECT id FROM nodes ORDER BY updated_at DESC LIMIT :limit"),
+            {"limit": limit},
+        )
+    ).all()
+    return [r._mapping["id"] for r in recent]
+
+
 async def hybrid_search(session: AsyncSession, q: str, limit: int = 12) -> list[Node]:
     """Hybrid retrieval: vector similarity (if embedding available) blended with trigram name match."""
     qvec = await embed_one(q)

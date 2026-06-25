@@ -6,10 +6,25 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_session
-from ..graph import hybrid_search, subgraph_bfs
+from ..graph import hybrid_search, overview_centers, subgraph_bfs
 from ..models import Subgraph
 
 router = APIRouter()
+
+
+@router.get("/overview", response_model=Subgraph)
+async def overview(
+    seeds: int = Query(12, ge=1, le=40, description="How many hub nodes to seed from"),
+    hops: int = Query(1, ge=0, le=3),
+    node_limit: int = Query(140, ge=1, le=500),
+    session: AsyncSession = Depends(get_session),
+) -> Subgraph:
+    """A no-query landing view: the graph's busiest hubs and their neighborhoods."""
+    centers = await overview_centers(session, limit=seeds)
+    if not centers:
+        return Subgraph(nodes=[], edges=[])
+    nodes, edges = await subgraph_bfs(session, centers, hops=hops, node_limit=node_limit)
+    return Subgraph(nodes=nodes, edges=edges)
 
 
 @router.get("/subgraph", response_model=Subgraph)
