@@ -180,12 +180,20 @@ export default function Home() {
         )}
       </div>
 
-      <Link
-        href="/graph"
-        className="relative z-20 mx-auto mb-3 text-xs text-[#f3ead3]/60 underline-offset-4 transition-colors hover:text-[#f3ead3] hover:underline"
-      >
-        Explore the knowledge graph →
-      </Link>
+      <div className="relative z-20 mx-auto mb-3 flex gap-5 text-xs text-[#f3ead3]/60">
+        <Link
+          href="/graph"
+          className="underline-offset-4 transition-colors hover:text-[#f3ead3] hover:underline"
+        >
+          Explore the knowledge graph →
+        </Link>
+        <Link
+          href="/dashboard"
+          className="underline-offset-4 transition-colors hover:text-[#f3ead3] hover:underline"
+        >
+          Agent dashboard →
+        </Link>
+      </div>
 
       <p className="relative z-20 mb-4 text-center text-[10px] uppercase tracking-[0.4em] text-[#f3ead3]/40">
         24h daylight · midnight sun · perpetual quorum

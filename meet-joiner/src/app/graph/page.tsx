@@ -92,12 +92,14 @@ export default function GraphExplorer() {
             central-kg-api
           </span>
         </div>
-        <Link
-          href="/"
-          className="text-xs text-[#f3ead3]/60 underline-offset-4 hover:text-[#f3ead3] hover:underline"
-        >
-          ← Meeting hall
-        </Link>
+        <nav className="flex gap-4 text-xs text-[#f3ead3]/60">
+          <Link href="/dashboard" className="underline-offset-4 hover:text-[#f3ead3] hover:underline">
+            Dashboard
+          </Link>
+          <Link href="/" className="underline-offset-4 hover:text-[#f3ead3] hover:underline">
+            ← Meeting hall
+          </Link>
+        </nav>
       </header>
 
       <div className="flex min-h-0 flex-1">

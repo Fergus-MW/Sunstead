@@ -23,9 +23,15 @@ the horizon over a layered pine forest.
   `ForceGraph.tsx` is the renderer (repulsion + link springs + centering,
   drag/zoom/pan, hover highlight, click-to-select); `page.tsx` is the
   search + detail-panel + legend shell; `types.ts` mirrors the KG models.
+- `src/app/dashboard/` — **agent dashboard** (`/dashboard`). Live event
+  feed + task status board + ask box, over the `agent-system` gateway.
+  `useStream.ts` is the auto-reconnecting WS hook; `AskBox.tsx` dispatches
+  tasks; `page.tsx` folds the stream into a per-task board.
 - `src/app/api/graph/` — server-side proxies to `central-kg-api`
   (`/subgraph`, `/entity/{id}`) so the KG base URL and CORS stay
   server-side. Configure via `KG_API_URL` (see `.env.example`).
+- `src/app/api/tasks/` — server-side proxy to the gateway's `POST /tasks`
+  (the ask box). Configure via `GATEWAY_URL`.
 
 ## Knowledge-graph explorer (`/graph`)
 
@@ -38,9 +44,31 @@ Point it at the KG service with `KG_API_URL` (defaults to
 `http://localhost:8000`). It needs `central-kg-api` running and a seeded
 graph — see [`../central-kg-api`](../central-kg-api).
 
-This is the first panel of a fuller admin dashboard; the live Kafka event
-feed + agent/task board are the planned next panels (they need the
-`agent-system/gateway` Kafka→WS bridge, currently a stub).
+## Agent dashboard (`/dashboard`)
+
+The admin surface over the live system. It opens a WebSocket to the
+`agent-system` gateway's `WS /stream` and renders:
+
+- **Live feed** — every `agent.results` / `agent.activity` envelope as it
+  arrives (newest first, ring-buffered).
+- **Task board** — the same stream folded into one card per `task_id`
+  (status, detail, result JSON, artifact links like a deployed URL).
+- **Ask box** — pick an intent + JSON args and dispatch a `task.create`
+  via `POST /api/tasks` → the gateway → Kafka.
+
+It's **resilient by design**: if the gateway isn't up yet, the WS hook sits
+in `connecting` and reconnects with backoff — the page is usable offline and
+fills in once the gateway comes online. Connection state shows in the header.
+
+Run the gateway with `make gateway` in [`../agent-system`](../agent-system)
+(port 8800). Configure `GATEWAY_URL` (server-side, for the ask box) and
+`NEXT_PUBLIC_GATEWAY_WS_URL` (client-side, for the feed) — see `.env.example`.
+
+> **Practicalities / not-yet-tested:** the dashboard is built to the gateway's
+> contract but the end-to-end path (gateway ↔ Aiven Kafka ↔ agent-runner)
+> hasn't been run locally or deployed yet. Expect to patch URLs/CORS/auth once
+> the bus is live. The graceful-degradation above means the UI won't crash
+> while that's being sorted.
 
 ## Run it
 
