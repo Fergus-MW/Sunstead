@@ -21,11 +21,9 @@ import pathlib
 import re
 
 from shared.contracts import TaskCreatePayload
-from shared.effort import policy_for
 from shared.harness import TaskCtx, first_arg, now_iso
 from shared.ingest import Source, persist
 from shared.streaming import stream_completion
-from shared.websearch import grounded_stream, web_tools
 
 from .vercel_deploy import deploy_sites
 
@@ -73,12 +71,10 @@ desktop. Fluid, readable line lengths.
 - Avoid generic AI aesthetics: not Inter/Roboto defaults, no purple-on-white gradient, no \
 cookie-cutter centered-hero-with-two-buttons. Make it feel intentional and on-brand.
 
-Grounding — do NOT hallucinate facts: if the brief refers to anything real that could be wrong if \
-you guessed it (a product, company, person, event, price, statistic, date, quote), USE web_search \
-to verify it FIRST, then write the copy from what you found — never invent specifics. If the brief \
-is a pure design task with no factual claims, don't search. Either way the OUTPUT is the site, not \
-a report: after any searching, return ONLY the HTML, starting with <!DOCTYPE html> — no search \
-commentary, no markdown fences."""
+Grounding — do NOT hallucinate specifics: if the brief refers to something real you're unsure of \
+(a product, company, person, event, price, statistic, date, quote), keep the copy general rather \
+than inventing precise details. The OUTPUT is the site: return ONLY the HTML, starting with \
+<!DOCTYPE html> — no commentary, no markdown fences."""
 
 # update_website prefers surgical SEARCH/REPLACE edits over re-emitting the whole doc: cheaper,
 # faster to stream, and it can't accidentally drop unrelated content. RARE sentinels so they never
@@ -214,34 +210,16 @@ async def run(task: TaskCreatePayload, ctx: TaskCtx) -> dict:
             html = _ensure_html(_strip_fences(rewrite))
     else:
         await ctx.activity("drafting site", brief)
-        # Grounded build: the model may web_search to verify any real facts the brief implies before
-        # it writes, so the copy isn't hallucinated (a "build a site about X" gets X right). Budgeted
-        # by the planner's effort tier for THINKING depth, but the SEARCH budget is held to a fixed,
-        # cheap cap (BUILD_GROUND_*) so grounding a site never turns into a slow research run. We give
-        # the build a turn floor of 4 so a couple of search round-trips still leave room to emit the
-        # document. `sources` is the provenance of whatever it looked up.
-        pol = policy_for(task.effort)
-        user_msg = {"role": "user", "content": f"Build: {brief}\nStyle: {style}"}
-        text, sources, _timed = await grounded_stream(
+        # Fast single-pass build: generate the whole site in one streamed completion. No web search —
+        # builds must be snappy for live use, so we avoid hallucinated specifics via the prompt (keep
+        # unknown facts general) rather than slow search round-trips.
+        text = await stream_completion(
             ctx,
             model=ctx.settings.model_smart,
-            system=BUILD_SYSTEM,
-            messages=[dict(user_msg)],
-            tools=web_tools(BUILD_GROUND_SEARCHES, BUILD_GROUND_FETCHES),
-            thinking_effort=pol.thinking_effort,
             max_tokens=16000,
-            max_turns=max(pol.max_turns, 4),
-            timeout=BUILD_TIMEOUT_S,
+            system=BUILD_SYSTEM,
+            messages=[{"role": "user", "content": f"Build: {brief}\nStyle: {style}"}],
         )
-        if not text.strip():  # grounding yielded nothing (timeout/tool error) — ungrounded fallback
-            await ctx.activity("grounding incomplete", "building without web grounding")
-            text = await stream_completion(
-                ctx,
-                model=ctx.settings.model_smart,
-                max_tokens=16000,
-                system=BUILD_SYSTEM,
-                messages=[dict(user_msg)],
-            )
         html = _ensure_html(_extract_html(_strip_fences(text)))
 
     # Truncation guard: a build or full-rewrite that ran out of tokens loses its closing tag. We
