@@ -99,7 +99,12 @@ The remaining risk is **integration, not capability.** Most of the original "thr
 web-agent real (site → served URL); delegation seam wired *twice* — the avatar's `delegate()` (§3, option a) **and**
 the `planner` (tails `meeting.transcript` → `agent.tasks.*`); gateway built (`POST /tasks` + `WS /stream`, with a
 replay ring buffer); Soniox STT + Anam avatar wired; FE `/api/join` dispatches + the dashboard scopes by `meeting_id`;
-a `mock_meeting` harness drives the whole pipe locally with no Recall/LiveKit.
+a `mock_meeting` harness drives the whole pipe locally with no Recall/LiveKit; **live reasoning streaming**
+(`agent.trace`) — agents stream adaptive-thinking + output deltas → gateway → a per-task FE reasoning panel
+(seq-ordered, replay-idempotent). **Oversight, phase one (§7):** the **grounding verifier** (a pre-emit gate that
+checks the KG agent's answer against the rows it retrieved, annotate-only / fail-open, badged on the FE), the
+**control channel** (`agent.control` → the runner cancels a running task; FE "stop" button), and a **mission-control
+dashboard** (a live digest bar — active/stuck/grounded/flagged — over a tiled agent board with verdict badges).
 
 **Left:**
 1. **Point runner/gateway at Aiven Kafka** (bootstrap + SASL creds) — flips local→cloud by env only.
@@ -121,6 +126,87 @@ Both trajectories — **win the live demo** and **win the written Anthropic subm
 - **Spoken vs FE-only results** — FE-only for the demo; spoken is a later notify edge. §3.
 - **Doc consolidation** — fold PLAN/AGENT_SYSTEM/HACKINFO detail into DESIGN/OVERVIEW as we go; keep them as deep
   references meanwhile.
+- **Oversight = gate + flag, not steer — DIRECTION SET.** Worker tasks are seconds long, so a coding-harness
+  *steering* overseer is the wrong tool; the value here is a **grounding gate** (the cost of a bad step is a false
+  claim *spoken in a live meeting*) and **fleet flags**. Three guards by altitude, each just another Kafka consumer;
+  fail-open. The realtime/async tempo split (§2) bars a slow verifier from the speech path. §7.
+
+## 7. Observability & oversight (the next phase)
+
+Reasoning now streams (`agent.trace`, §5), so the system can *show* what agents think and *judge* it. The forward
+goal: **replace the human who watches agents work** — both a single agent's reasoning and a fleet of them.
+
+**The shape is set by the tempo split (§2), not by copying a coding harness.** A coding-harness overseer *steers* a
+long autonomous run mid-flight; that's the wrong tool here — worker tasks are seconds long, so by the time an overseer
+evaluates a checkpoint the task is done. **Here, oversight is a gate and a flag, not a steer.** And a slow LLM verifier
+**cannot sit in front of speech** (the <1s realtime path): it gates the *async result* and the *FE deliverable*; for
+spoken results it must be cheap (deterministic + fast model) or post-hoc ("let me correct that"). Why it's worth more
+here than in a coding harness: the cost of a bad step isn't a failed test caught later — it's **a false statement
+spoken to clients in a live meeting.** The git/KG agent already promises *"never invent people, files, decisions"*;
+nothing enforces it. That's the gap.
+
+### Three guards, by altitude
+
+| Guard | Watches | Question | Cost | Replaces |
+|---|---|---|---|---|
+| **Tripwire** | one agent's *reasoning* stream | "is the thinking going off the rails / fabricating?" | cheap — pattern-match + occasional small-model check | the human reading a thinking stream |
+| **Verifier** | one agent's *output* before emit | "does this answer follow from the evidence (rows/tools)?" | one LLM round-trip (fast model on the speech path) | the human sanity-checking an answer |
+| **Conductor** | *all* tasks in a meeting | "is one stuck? are two in conflict? a duplicate? mis-dispatched?" | mostly deterministic + LLM for judgment calls | the human watching the dashboard |
+
+Tripwire = process guard (the *single agent in reasoning* case); verifier = product guard; conductor = fleet guard
+(the *multiple agents* case). **Don't LLM the mechanical parts** — stuck/dedup/latency are plain code; reserve the
+model for grounding and conflict judgments.
+
+### It fits the architecture for free
+
+An overseer is **just another Kafka consumer/producer**, like the gateway. The conductor tails `agent.activity` +
+`agent.results` + `agent.trace`, holds session state, and emits `agent.oversight` events (verdicts, flags) — the FE
+renders them; the avatar can *speak* them. The verifier slots into the harness **pre-emit boundary** (between an agent
+returning and `_emit_result`) — one insertion point, all agents covered.
+
+> **Oversight is also content.** A conductor flag ("two agents disagree on who owns auth") isn't just a dashboard
+> badge — the avatar can voice it: *"heads up, I'm getting conflicting answers — let me reconcile."* That turns
+> oversight from a safety net into a **conversational** feature, and is what makes the avatar a believable AI
+> *employee* (§1) rather than a query box.
+
+### Principles
+
+- **Fail open, not closed.** A conversational system frustrated by a wrong overseer is worse than one occasional
+  ungrounded claim. Default to *annotating / downgrading confidence*; *block* only on high-confidence violations; let
+  the human override. Who-watches-the-watcher is real.
+- **Durable verdicts → the KG.** Project oversight state into the graph (meeting → task → verdict). Makes it
+  queryable, an audit trail, and *more MCP surface* — it strengthens the depth story instead of being a side system.
+- **Budget the round-trips.** Each verifier call ~doubles per-task LLM cost. Gate it behind a deterministic
+  pre-filter (only when the answer makes factual/KG claims) and use the fast model.
+
+### The control channel — SHIPPED (the first step to *acting*)
+
+`agent.control` exists: the gateway's `POST /control` (FE "stop" button → `/api/control` proxy) publishes a `cancel`,
+a **broadcast** consumer in the runner cancels the owning task's asyncio task, and asyncio cancellation lands the stop
+at the agent's next await (LLM stream / tool call) — the harness then emits a terminal "cancelled" result so the FE
+updates. `cancel` is the v1 action; **redirect** (steer, not just stop) is the natural next verb on the same channel.
+Caveat: cancellation is broadcast, but **stuck/conflict detection that would auto-issue a cancel still lives in the FE
+digest, not a backend conductor** — promoting that judgement server-side is the remaining conductor work.
+
+### Mission control (the "look cool" view) — digest SHIPPED, swimlane next
+
+The dashboard is now a **mission-control** view: a live **digest bar** (a *client-side* conductor — active · stuck ·
+grounded · flagged · done · failed, recomputed on a 2s tick) over a tiled agent board with **verdict badges** (green
+"grounded ✓ N rows" / amber "unsupported NN%"), collapsible live reasoning, and a per-card **stop** button. The digest
+panel *is* the replaced human. Still ahead: the **timeline / swimlane** (one lane per agent, time on x) for the
+fleet-over-time view, and moving the conductor's judgement (conflict, auto-stop) from the FE into a backend service.
+
+### Adjacent reliability wins (same analysis surfaced these)
+
+- **Durable idempotency.** `harness` dedupe (`ctx._seen`) is in-memory; a restart re-runs delivered tasks (duplicate
+  site builds) under at-least-once redelivery. Persist to the session store. *(Real bug, not polish.)*
+- **Stream to TTS.** Trace deltas reach the FE but the avatar still gets only the *final* result — the meeting sits
+  silent, then a wall of text. A second consumer on `agent.trace`'s `text` phase → the speech path is the real §3.5
+  payoff (and the §3 "spoken results" notify edge).
+- **Templated SQL for known intents.** §3.5 wants the LLM skipped on known retrievals; the KG agent LLMs everything —
+  slower, costlier, and *more* hallucination surface than a parameterized query.
+- **KG as the cross-agent substrate.** Agents share *conclusions* (nodes), not raw traces — the indexed, durable
+  version of "agents see each other's context."
 
 ---
 

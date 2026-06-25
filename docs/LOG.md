@@ -5,6 +5,75 @@
 
 ---
 
+## 2026-06-25 — Oversight phase one: grounding verifier, control channel, mission-control UI
+
+**What:** built the first three pieces of the oversight design (DESIGN §7). (1) **Grounding verifier** — a pre-emit
+gate in the harness: a specialist that wants its answer checked returns `_verify={claim, evidence}`; the harness runs
+a fast-model JSON-schema judge (`shared/verify.py`) and attaches a `Verdict{grounded, confidence, evidence_count,
+note}` to the result. The KG/git agent captures the rows each `aiven_pg_read` returns via a transparent
+`_RecordingSession` proxy (`shared/mcp.py`) — the evidence was otherwise discarded inside the tool-runner. (2)
+**Control channel** — new `agent.control` topic + `ControlPayload`; the gateway gained `POST /control` (FE
+`/api/control` proxy + a per-card "stop" button), and the runner now tracks running tasks by `task_id` and runs a
+**broadcast** control consumer that `task.cancel()`s the owner; the harness catches `CancelledError` and emits a
+terminal "cancelled" result. (3) **Mission-control dashboard** — a live digest bar (active/stuck/grounded/flagged on a
+2s tick — a client-side conductor), a tiled agent board with verdict badges + collapsible reasoning + stop buttons.
+
+**Why:** the operator asked to build the oversight work well, then overhaul the UI. The verifier was first by the §7
+priority (highest trust-per-effort: it *enforces* the KG agent's standing promise to "never invent people, files,
+decisions", which nothing did before — and the cost of a bad answer here is a false claim spoken in a live meeting).
+The control channel is the one structural addition that turns oversight from observe-only into *act*. The dashboard
+overhaul makes the whole thing legible — and the digest *is* the human it replaces.
+
+**Analysis / consequences:** verification is **annotate-only / fail-open** — it never blocks and any verifier error
+returns a neutral verdict, so a flaky check can't fail a good answer; it only runs when an agent supplies evidence (web
+builds cost nothing). The recording proxy captures evidence per-task without coupling to tool-runner internals.
+Cancellation rides asyncio: agents are cancellable at every await (stream/tool boundary) for free — no per-agent flag
+checks. Control is a **broadcast** group so any runner instance that owns the task honours the stop. Verified: backend
+compiles + `Verdict`/`ControlPayload` round-trip through the envelope; FE `tsc` + `eslint` clean. **Still FE-side, not
+backend:** the conductor's *judgement* (stuck/conflict → auto-cancel) is computed in the digest, not a service — that
+promotion, plus a `redirect` control verb and the swimlane view, is the remaining §7 work.
+
+**Touches:** `agent-system/shared/src/shared/{config,contracts,harness,verify,mcp}.py`,
+`agent-system/agent-runner/src/agent_runner/{runner,gateway}.py`, `agent-runner/.../agents/git.py`,
+`meet-joiner/src/app/dashboard/{page.tsx,types.ts}`, `meet-joiner/src/app/api/control/route.ts`, `docs/{DESIGN,LOG}.md`.
+
+— Claude (Opus 4.8), signed off
+
+---
+
+## 2026-06-25 — Shipped reasoning streaming; set the oversight direction (gate, not steer)
+
+**What:** added `agent.trace` — agents now stream **adaptive-thinking + output deltas** over Kafka (new `TracePayload`,
+a per-task `ctx.trace()` with a monotonic `seq`, and a `shared/streaming.py` helper the web-agent uses; the git/KG
+agent forwards per-turn blocks since its tool-runner returns whole messages). The gateway tails `agent.trace`; the FE
+folds deltas into a per-task **reasoning panel** (thinking above the streamed answer, seq-ordered + replay-idempotent,
+kept out of the events ring so it can't evict task state). Then analyzed where oversight fits and recorded the
+direction in **DESIGN §7**.
+
+**Why:** the operator asked whether agents should see each other's reasoning and whether an *overseer* fits this build.
+Streaming reasoning is the enabler for both watching and judging. On oversight: a coding-harness *steering* overseer is
+a weak fit — worker tasks are seconds long, so there's nothing to steer before they finish. A **verifier** (grounding
+gate) + **conductor** (fleet coherence) fit strongly, *because* the cost of a bad step here is a false claim **spoken
+in a live meeting**, and the git/KG agent already promises not to invent facts but nothing enforces it.
+
+**Analysis / consequences:** oversight here = **gate + flag, not steer**; three guards by altitude — *tripwire*
+(reasoning/process), *verifier* (output/product), *conductor* (fleet) — each just another Kafka consumer, so zero
+structural change. The realtime/async tempo split (DESIGN §2) bars a slow verifier from the **speech path** — gate
+async/FE results, keep speech cheap or post-hoc. Fail-open by default (a wrong overseer suppressing good answers is
+worse than an occasional hedge); project verdicts into the KG for a durable, queryable audit trail + extra MCP surface.
+Cross-agent context wants *conclusions* (KG nodes), not raw traces. Surfaced adjacent gaps: in-memory idempotency
+(`_seen`) re-runs tasks on restart; trace doesn't reach TTS yet (the §3.5 speech payoff); the KG agent LLMs even known
+retrievals. The one structural addition implied is an `agent.control` topic — the prerequisite to *act* rather than
+only flag. Full roadmap in DESIGN §7.
+
+**Touches:** `agent-system/shared/src/shared/{config,contracts,harness,streaming}.py`,
+`agent-system/agent-runner/src/agent_runner/{gateway.py,agents/{web,git}.py}`,
+`meet-joiner/src/app/dashboard/{types.ts,useStream.ts,page.tsx}`, `docs/{DESIGN,LOG}.md`.
+
+— Claude (Opus 4.8), signed off
+
+---
+
 ## 2026-06-25 — Made the planner the single delegation brain; the avatar emits transcript
 
 **What:** resolved the "two brains" hazard (DESIGN §6) by deciding **the planner is the single delegation brain**,
