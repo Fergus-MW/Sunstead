@@ -1,0 +1,59 @@
+{
+  "meeting_id": "standup-2026-06-25",
+  "title": "Engineering standup — Wed 2026-06-25",
+  "occurred_at": "2026-06-25T09:30:00+00:00",
+  "channel": "google-meet",
+  "attendees": [
+    "Robert Craigie",
+    "Felix Becker",
+    "Packy Gallagher",
+    "Qing Wang"
+  ],
+  "utterances": [
+    {
+      "speaker": "Robert Craigie",
+      "ts": "2026-06-25T09:30:10+00:00",
+      "text": "Yesterday's release on track. Two things from me — I want to talk about the streaming refactor risk, and then dependencies for 0.113."
+    },
+    {
+      "speaker": "Packy Gallagher",
+      "ts": "2026-06-25T09:30:50+00:00",
+      "text": "Refactor PR is up. Felix and I paired on the API. We landed on a single RetryPolicy with two execute methods — execute_sync and execute_async. Stream picks the async one, the sync memory-tool callsites pick sync. PR-456. Ready for review."
+    },
+    {
+      "speaker": "Felix Becker",
+      "ts": "2026-06-25T09:31:30+00:00",
+      "text": "I also narrowed the bare Exception catches in _streaming.py — three of them are now SSEError, one is a CancelledError that we deliberately let propagate. Tests passing locally."
+    },
+    {
+      "speaker": "Qing Wang",
+      "ts": "2026-06-25T09:32:10+00:00",
+      "text": "Agents test suite is done. Coverage on beta_session_runner is at 87 percent. I want to push it to 95 but that's a 0.113 task. Asking the room — should beta_session_runner be moved out of lib/tools? It really belongs under resources/."
+    },
+    {
+      "speaker": "Robert Craigie",
+      "ts": "2026-06-25T09:32:50+00:00",
+      "text": "Good question. Decision: leave it in lib/tools for now, the Stainless codegen still emits to that path. We'll move it when we do the 1.0 path cleanup."
+    },
+    {
+      "speaker": "Packy Gallagher",
+      "ts": "2026-06-25T09:33:20+00:00",
+      "text": "Risk on the streaming refactor — it changes the public-ish surface of Stream. If a customer was poking at Stream.retry directly, it's now Stream._retry_policy.execute_async. We should call it out in CHANGELOG.md."
+    },
+    {
+      "speaker": "Robert Craigie",
+      "ts": "2026-06-25T09:33:55+00:00",
+      "text": "Agreed. Action item Packy — add a migration note. We can also keep Stream.retry as a deprecated shim that delegates, for one release. Decision: dual surface for 0.112, drop the shim in 0.113."
+    },
+    {
+      "speaker": "Felix Becker",
+      "ts": "2026-06-25T09:34:30+00:00",
+      "text": "Last item from me — I'm taking Friday off. Robert, can you cover the on-call rotation?"
+    },
+    {
+      "speaker": "Robert Craigie",
+      "ts": "2026-06-25T09:34:55+00:00",
+      "text": "Covered. Have a good weekend."
+    }
+  ]
+}

@@ -1,0 +1,50 @@
+{
+  "meeting_id": "standup-2026-06-24",
+  "title": "Engineering standup — Tue 2026-06-24",
+  "occurred_at": "2026-06-24T09:30:00+00:00",
+  "channel": "google-meet",
+  "attendees": [
+    "Robert Craigie",
+    "Felix Becker",
+    "Packy Gallagher",
+    "Qing Wang",
+    "Tomer Aberbach"
+  ],
+  "utterances": [
+    {
+      "speaker": "Robert Craigie",
+      "ts": "2026-06-24T09:30:08+00:00",
+      "text": "Memory tool fix is merged. The parent directory creation now uses os.makedirs with exist_ok. Path traversal issue is filed as a follow-up. Moving on."
+    },
+    {
+      "speaker": "Packy Gallagher",
+      "ts": "2026-06-24T09:30:45+00:00",
+      "text": "Streaming refactor: I've extracted retry into a new RetryPolicy class. The Stream and AsyncStream classes in _streaming.py now compose it instead of inlining the exponential backoff. Around 200 lines smaller. Felix has the API question."
+    },
+    {
+      "speaker": "Felix Becker",
+      "ts": "2026-06-24T09:31:20+00:00",
+      "text": "Spike done. We should support both — sync and async retry policies. Most users will use the async one but the new sandboxed memory tool path needs sync. I've sent the design doc, can someone review?"
+    },
+    {
+      "speaker": "Qing Wang",
+      "ts": "2026-06-24T09:32:00+00:00",
+      "text": "Stainless codegen landed. I'm unblocked on agents. Picking up the test suite for beta_session_runner today, should be done tomorrow."
+    },
+    {
+      "speaker": "Tomer Aberbach",
+      "ts": "2026-06-24T09:32:40+00:00",
+      "text": "From the Stainless side — we shipped a fix for the type generation on optional union fields. That was breaking the agents resource. Let me know if anything else looks off."
+    },
+    {
+      "speaker": "Robert Craigie",
+      "ts": "2026-06-24T09:33:15+00:00",
+      "text": "Decision: Felix, you own the RetryPolicy sync/async surface. We'll go dual API. Packy, please pair with him on the API shape before merging the refactor. Release on track for Thursday."
+    },
+    {
+      "speaker": "Felix Becker",
+      "ts": "2026-06-24T09:33:50+00:00",
+      "text": "One more thing — _streaming.py has 3 places where we still catch a bare Exception. I want to narrow those before the release. Action item."
+    }
+  ]
+}

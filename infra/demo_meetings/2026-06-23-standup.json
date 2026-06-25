@@ -1,0 +1,49 @@
+{
+  "meeting_id": "standup-2026-06-23",
+  "title": "Engineering standup — Mon 2026-06-23",
+  "occurred_at": "2026-06-23T09:30:00+00:00",
+  "channel": "google-meet",
+  "attendees": [
+    "Robert Craigie",
+    "Felix Becker",
+    "Packy Gallagher",
+    "Qing Wang"
+  ],
+  "utterances": [
+    {
+      "speaker": "Robert Craigie",
+      "ts": "2026-06-23T09:30:12+00:00",
+      "text": "Good morning everyone. Let's go around. I spent yesterday on the memory tool filesystem layer — there's an edge case where the parent directory doesn't exist on write. Fix is up at https://github.com/anthropics/anthropic-sdk-python/pull/9 referencing _beta_builtin_memory_tool.py, should land today."
+    },
+    {
+      "speaker": "Felix Becker",
+      "ts": "2026-06-23T09:31:02+00:00",
+      "text": "Quick question Robert — does that also cover the case where the tool gets a path traversal attempt? I noticed _filesystem.py doesn't validate parent paths against the workspace root."
+    },
+    {
+      "speaker": "Robert Craigie",
+      "ts": "2026-06-23T09:31:30+00:00",
+      "text": "Good catch, no. I'll add a follow-up issue for the path traversal. Marking it a known issue, not a blocker for the memory tool launch."
+    },
+    {
+      "speaker": "Packy Gallagher",
+      "ts": "2026-06-23T09:32:10+00:00",
+      "text": "I'm picking up the streaming refactor. The Stream class in _streaming.py has been accumulating retry logic that should really live in a separate RetryPolicy. Felix and I sketched the API last week. Aiming to have a PR up by Thursday."
+    },
+    {
+      "speaker": "Qing Wang",
+      "ts": "2026-06-23T09:33:05+00:00",
+      "text": "I'm blocked on the agents resource — the beta_session_runner depends on a Stainless codegen change that hasn't landed. Eric is on it, should be sometime today. In the meantime I'm writing tests for the existing surface."
+    },
+    {
+      "speaker": "Robert Craigie",
+      "ts": "2026-06-23T09:33:40+00:00",
+      "text": "Decision: we'll cut the 0.112.0 release once the memory tool fix and Packy's streaming refactor are both in. Target Thursday EOD. Qing, your agents work can land in 0.113."
+    },
+    {
+      "speaker": "Felix Becker",
+      "ts": "2026-06-23T09:34:20+00:00",
+      "text": "Action item for me: spike on whether we should expose a sync API for the streaming retry policy, or async-only. I'll have an answer by tomorrow's standup."
+    }
+  ]
+}
