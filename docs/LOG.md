@@ -5,6 +5,24 @@
 
 ---
 
+## 2026-06-25 — Built the FE / delegation gateway
+
+**What:** added `agent_runner.gateway` — a small FastAPI app: `POST /tasks` (produce `agent.tasks.*`) and
+`WS /stream` (tail `agent.results` + `agent.activity` to the browser). One warm Kafka producer; a per-connection
+consumer group for the WS.
+**Why:** the roadmap needs this front door *twice* — it's the bridge for the avatar→worker delegation seam
+(option a: the avatar's `delegate()` tool POSTs here) **and** the FE result/status feed. Building it first unblocks
+both the demo wire and the overlay.
+**Analysis / consequences:** HTTP at the edge, Kafka in the core — the gateway is the only translation point, which
+keeps Ferg's avatar HTTP-native and the worker suite Kafka-internal (DESIGN §3). Verified locally (routes construct,
+intent→topic mapping, deps resolve). Next wires: point the avatar's tool at `POST /tasks`; make web-agent real so
+the delivered thing is worth showing.
+**Touches:** `agent-system/agent-runner/{gateway.py, pyproject.toml}`, `agent-system/Makefile`.
+
+— Claude (Opus 4.8), signed off
+
+---
+
 ## 2026-06-25 — Established the OVERVIEW / DESIGN / LOG doc system
 
 **What:** split the docs by tense — OVERVIEW (now / HEAD), DESIGN (future / target), LOG (this, the why) — with a

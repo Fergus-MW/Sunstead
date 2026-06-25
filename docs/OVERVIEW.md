@@ -36,7 +36,7 @@ dev script writes to. The two best-built parts don't talk to each other. **Aiven
 |---|---|---|---|
 | `central-kg-api/` | KG service (FastAPI/Mangum) + `seed/` CLI (tree-sitter + git → graph) | `main` | real, deployed-ready |
 | `infra/` | Aiven provisioning (`provision.sh`, `aiven-mcp.json`) + OpenSearch mirror | `main` | scripts ready; **Kafka not provisioned** |
-| `agent-system/` | our agent-runner container (shared spine + harness + git/echo agents) + local redpanda dev | `main` | foundation done; needs gateway + web-agent |
+| `agent-system/` | our agent-runner container (shared spine + harness + git/echo agents + **gateway**) + local redpanda dev | `main` | foundation + gateway done; needs web-agent + the delegation wire |
 | `meet-joiner/` | FE bot-launcher (Next.js, Vercel) | `main` | thin |
 | `avatar-agent/` | the listener/avatar (LiveKit/Recall/Anam) | **`origin/ferg/avatar-agent`** | **unmerged**, strong, off-architecture |
 | demo transcripts / bench / extra tests | seed demo data | **`origin/feat/demo-data-layers`** | **unmerged** (additive) |
