@@ -1,4 +1,4 @@
-.PHONY: sync up down topics smoke run planner gateway gateway-smoke sites echo web say mock spike ask \
+.PHONY: sync up down topics smoke run planner gateway gateway-smoke sites echo web say mock spike ask try \
         build stack stack-full stack-down stack-logs
 
 sync:    ; uv sync
@@ -17,6 +17,7 @@ say:     ; uv run python scripts/say.py --text "$(T)"
 mock:    ; uv run python scripts/mock_meeting.py        # interactive: speak + watch the agents (no Recall/LiveKit)
 spike:   ; uv run python scripts/spike.py
 ask:     ; uv run python scripts/ask.py --question "$(Q)"
+try:     ; uv run python scripts/try_agent.py --intent $(I) --args '$(A)'   # one agent, no Kafka (I=intent A=json)
 
 # --- containerized stack (one command; no per-service terminals) — docs/DEPLOY.md ---
 build:      ; docker compose build
