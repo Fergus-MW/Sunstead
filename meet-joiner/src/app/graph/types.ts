@@ -45,3 +45,50 @@ export const FALLBACK_COLOR = "#bcae8a";
 export function colorFor(type: string): string {
   return NODE_COLORS[type] ?? FALLBACK_COLOR;
 }
+
+// Human-readable label for a node type (e.g. "user_story" → "User story").
+export function typeLabel(type: string): string {
+  return type.replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase());
+}
+
+// Relationship phrasing for edges, read source → target.
+export const EDGE_LABELS: Record<string, string> = {
+  depends_on: "depends on",
+  discussed_in: "discussed in",
+  implements: "implements",
+  relates_to: "relates to",
+  derived_from: "derived from",
+  assigned_to: "assigned to",
+  blocks: "blocks",
+  mentions: "mentions",
+  part_of: "part of",
+  owns: "owns",
+};
+
+export function edgeLabel(type: string): string {
+  return EDGE_LABELS[type] ?? type.replace(/_/g, " ");
+}
+
+// A compact label for crowded canvases: keep the last 1–2 path segments,
+// strip pytest node-ids, and cap length. Full name lives in the detail panel.
+export function shortLabel(name: string): string {
+  let s = name.split("::")[0]; // drop pytest "::test_x" suffixes
+  if (s.includes("/")) {
+    const parts = s.split("/").filter(Boolean);
+    s = parts.slice(-2).join("/");
+  }
+  return s.length > 22 ? s.slice(0, 21) + "…" : s;
+}
+
+// Turn a property key into a readable label ("author_email" → "Author email").
+export function humanizeKey(key: string): string {
+  return key.replace(/[_-]+/g, " ").replace(/^\w/, (c) => c.toUpperCase());
+}
+
+// Render a property value compactly for the detail list.
+export function formatValue(value: unknown): string {
+  if (value == null) return "—";
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return JSON.stringify(value);
+}

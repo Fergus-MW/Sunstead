@@ -64,11 +64,12 @@ Run the gateway with `make gateway` in [`../agent-system`](../agent-system)
 (port 8800). Configure `GATEWAY_URL` (server-side, for the ask box) and
 `NEXT_PUBLIC_GATEWAY_WS_URL` (client-side, for the feed) — see `.env.example`.
 
-> **Practicalities / not-yet-tested:** the dashboard is built to the gateway's
-> contract but the end-to-end path (gateway ↔ Aiven Kafka ↔ agent-runner)
-> hasn't been run locally or deployed yet. Expect to patch URLs/CORS/auth once
-> the bus is live. The graceful-degradation above means the UI won't crash
-> while that's being sorted.
+> **Practicalities:** the local end-to-end path (dashboard `/api/tasks` → gateway →
+> local Kafka/redpanda → agent-runner → `WS /stream`) has been **run and proven
+> locally** (see `docs/LOG.md`). Still to patch for production: `wss://` + TLS on
+> the gateway (the browser opens the WS directly), CORS/auth, and the switch from
+> local redpanda to the now-provisioned **Aiven Kafka**. The graceful-degradation
+> above means the UI won't crash while a backend is down.
 
 ## Run it
 
