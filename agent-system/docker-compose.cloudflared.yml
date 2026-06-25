@@ -1,0 +1,28 @@
+# Cloudflare Tunnel — exposes the gateway (HTTP + WSS) and the sites host over public
+# TLS with NO inbound ports on the EC2 box: cloudflared dials OUT to Cloudflare, so the
+# security group can stay SSH-only. Use ALONGSIDE the Aiven compose (same project name,
+# so cloudflared shares the network and can reach services by name):
+#
+#   docker compose -f docker-compose.aiven.yml -f docker-compose.cloudflared.yml up --build -d
+#
+# One-time setup (Cloudflare Zero Trust dashboard → Networks → Tunnels):
+#   1. Create a tunnel → copy its token into CLOUDFLARE_TUNNEL_TOKEN in .env
+#   2. Add Public Hostnames on that tunnel (Service = the in-network address):
+#        gateway.<your-domain>  →  HTTP   http://gateway:8800
+#        sites.<your-domain>    →  HTTP   http://sites:8810
+#      (WebSockets pass through automatically; no extra config for /stream.)
+#   3. Point the rest of the system at those hostnames:
+#        Vercel FE:  NEXT_PUBLIC_GATEWAY_WS_URL = wss://gateway.<your-domain>/stream
+#                    GATEWAY_URL                = https://gateway.<your-domain>
+#        this .env:  SITES_BASE_URL             = https://sites.<your-domain>
+
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: ["tunnel", "--no-autoupdate", "run"]
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN}
+    restart: unless-stopped
+    depends_on:
+      - gateway
+      - sites
