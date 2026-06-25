@@ -1,5 +1,6 @@
 .env
 .sessions/
+.sites/
 *.pem
 *.cert
 *.key
