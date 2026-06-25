@@ -5,6 +5,37 @@
 
 ---
 
+## 2026-06-25 — Built the FE admin surface: KG graph explorer + agent dashboard
+
+**What:** turned the thin `meet-joiner` bot-launcher into a real admin surface, in three commits. (1) A
+**knowledge-graph explorer** (`/graph`): search → `central-kg-api` `/subgraph` → an interactive force graph; click a
+node → `/entity/{id}` → expand neighbors. (2) An **agent dashboard** (`/dashboard`): an auto-reconnecting WS client
+on the gateway's `WS /stream` rendering a live `agent.results`/`agent.activity` feed + a per-`task_id` status board,
+plus an **ask box** that dispatches `task.create` via `POST /api/tasks` → gateway → Kafka. Server-side proxy routes
+(`/api/graph/*`, `/api/tasks`) keep backend URLs + CORS off the browser; the WS connects directly.
+
+**Why:** the project's strongest work (MCP-native git-agent, the 6k-node live graph, the Kafka swarm) is **invisible**
+— it lives in logs. The Aiven challenge is judged remotely from a video + written submission, so a surface that
+*renders* the graph and the live bus converts existing depth into something a judge can see. The operator chose
+"graph explorer first," so it shipped standalone before the gateway-dependent panels.
+
+**Analysis / consequences:** chose a **zero-dependency hand-rolled canvas force graph** over a library (react-force-
+graph / Cytoscape) — `meet-joiner/AGENTS.md` warns the Next is modified, so avoiding SSR/dep landmines and matching
+the existing inline-SVG aesthetic won. Built deliberately **resilient**: the WS hook backs off and reconnects, so
+the dashboard is usable *before* the gateway/Kafka exist and self-heals when they come up — this matters because
+**nothing here has been run e2e or deployed yet** (operator flagged it). Reverted npm-install's platform-specific
+`package-lock.json` churn from each commit. Discovered mid-build that a teammate landed the real
+`agent_runner.gateway` (`POST /tasks` + `WS /stream`, port 8800) — the dashboard targets that exact contract; those
+agent-system edits were left for their author, not committed here. Open practicalities to patch once the bus is live:
+gateway CORS/auth, `wss://` in prod, the WS `meeting_id` filter, and whether `/api/tasks` should carry auth.
+
+**Touches:** `meet-joiner/src/app/{graph,dashboard}/**`, `meet-joiner/src/app/api/{graph,tasks}/**`,
+`meet-joiner/src/app/page.tsx`, `meet-joiner/{.env.example,README.md}`, `docs/OVERVIEW.md`.
+
+— Claude (Opus 4.8), signed off
+
+---
+
 ## 2026-06-25 — Built the FE / delegation gateway
 
 **What:** added `agent_runner.gateway` — a small FastAPI app: `POST /tasks` (produce `agent.tasks.*`) and
