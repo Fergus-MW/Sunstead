@@ -245,15 +245,25 @@ async def gate_utterance(anthropic, model_fast: str, text: str, recent_context: 
     return True
 
 
-async def plan_utterance(anthropic, model: str, text: str) -> list[dict]:
-    """Ask the model to turn one utterance into zero or more tasks. Returns [] on nothing actionable."""
+async def plan_utterance(anthropic, model: str, text: str, recent_context: str = "") -> list[dict]:
+    """Ask the model to turn one utterance into zero or more tasks. Returns [] on nothing actionable.
+
+    `recent_context` is the last couple of FINAL utterances *before* this one, passed for
+    disambiguation only — a request split across turns ("can you build a site…" / "…about the
+    EU AI Act") is otherwise invisible to a per-utterance planner. The model is told to act on
+    the latest utterance and not re-action earlier lines (those already passed through here and
+    were deduped), so the context resolves references without causing double-delegation."""
+    user = text if not recent_context else (
+        "Recent context (for disambiguation only — do NOT re-action these earlier lines, they "
+        f"were already handled):\n{recent_context}\n\nUtterance to plan now:\n{text}"
+    )
     resp = await anthropic.messages.create(
         model=model,
         max_tokens=1024,
         system=_cached_system(PLANNER_SYSTEM),
         tools=[PLAN_TOOL],
         tool_choice={"type": "tool", "name": "propose_tasks"},
-        messages=[{"role": "user", "content": text}],
+        messages=[{"role": "user", "content": user}],
     )
     for block in resp.content:
         if getattr(block, "type", None) == "tool_use" and block.name == "propose_tasks":
@@ -367,7 +377,10 @@ async def main() -> None:
                 continue
 
             try:
-                tasks = await plan_utterance(anthropic, s.model_smart, text)
+                # the prior 1-2 utterances (the current one is already the tail of dq) let the
+                # planner resolve a request split across turns; it's told not to re-action them.
+                prior_context = "\n".join(list(dq)[-3:-1])
+                tasks = await plan_utterance(anthropic, s.model_smart, text, prior_context)
             except Exception as e:
                 log.warning("planning failed for %r: %s", text[:60], e)
                 continue

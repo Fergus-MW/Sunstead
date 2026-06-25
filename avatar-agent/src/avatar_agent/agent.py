@@ -164,14 +164,23 @@ async def entrypoint(ctx: JobContext) -> None:
     def _on_metrics(ev: MetricsCollectedEvent) -> None:
         metrics.log_metrics(ev.metrics)
 
-    # ── Single delegation brain (DESIGN §6): publish each FINAL user utterance to the
-    # gateway → `meeting.transcript`, so the planner routes it and the FE feed shows it.
+    # ── Delegation brain selection (DESIGN §6). Exactly ONE brain may turn an utterance
+    # into a task, or the same request is delegated twice. The two modes are mutually
+    # exclusive:
+    #   • planner mode (default): publish each FINAL utterance to `meeting.transcript`;
+    #     the planner routes it (and the gateway bridges it to the FE feed). The avatar
+    #     carries no delegate() tool in this mode.
+    #   • AVATAR_DELEGATES mode: the avatar dispatches work itself via the delegate() tool
+    #     (a separate POST /tasks path), so it must NOT also feed the planner's routing
+    #     topic — and a planner must not be run alongside it. We suppress transcript-for-
+    #     routing here so "two brains delegating the same utterance" is impossible.
     # Best-effort and off the hot path; transcript emission must never disrupt the call. ──
+    _route_transcript = gateway.enabled and not cfg.avatar_delegates
     _bg: set[asyncio.Task] = set()
 
     @session.on("user_input_transcribed")
     def _on_user_transcript(ev: UserInputTranscribedEvent) -> None:
-        if not ev.is_final or not (ev.transcript or "").strip() or not gateway.enabled:
+        if not ev.is_final or not (ev.transcript or "").strip() or not _route_transcript:
             return
 
         async def _emit() -> None:
@@ -233,6 +242,12 @@ async def entrypoint(ctx: JobContext) -> None:
 
     # Default: planner is the single brain (avatar emits transcript above), so the
     # avatar carries read tools only. AVATAR_DELEGATES adds the delegate() tool.
+    if cfg.avatar_delegates:
+        logger.warning(
+            "AVATAR_DELEGATES is on: this avatar dispatches work itself and does NOT "
+            "feed the planner. Do NOT run the planner against this meeting, or every "
+            "request is delegated twice."
+        )
     tools = [*BASE_TOOLS, delegate] if cfg.avatar_delegates else list(BASE_TOOLS)
     await session.start(
         agent=Agent(instructions=_instructions(cfg), tools=tools),
