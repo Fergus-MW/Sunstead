@@ -23,7 +23,8 @@ RUN pip install --no-cache-dir --upgrade pip \
       "anthropic>=0.40" \
       "python-dotenv>=1.0" \
       "httpx>=0.27" \
-      "orjson>=3.10"
+      "orjson>=3.10" \
+      "mangum>=0.17"
 
 COPY app ./app
 
