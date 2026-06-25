@@ -1,3 +1,7 @@
 # Environment variables
 .env
 .env.*
+
+# Shareable env bundle (contains real secrets once filled — never commit)
+env-bundle/
+env-bundle.zip
