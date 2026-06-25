@@ -17,7 +17,7 @@ We own **one agent-runner container**: a long-lived Kafka consumer + a shared ag
 agents + a file/session store + the thin FE gateway. We do **not** own the call/transcription stack — a teammate
 runs that in its **own** container (LiveKit/Recall + STT; *confirm which*). The knowledge graph is a teammate's
 `central-kg-api`, but **our agents never call its HTTP API** — they read/write the same Aiven Postgres directly
-through Aiven MCP (§8).
+through Aiven MCP (§7).
 
 ```
   CALL CONTAINER (teammate)                   AGENT-RUNNER CONTAINER (ours, one image)
@@ -28,7 +28,7 @@ through Aiven MCP (§8).
  │     meeting.transcript     │              │  specialists: web · git · data · meeting-ops│
  │     agent.tasks.*          │              │  FILE/SESSION store: sessions/<id>/...       │
  │  └ consumes ◀──────────────┼──────────────┤  Aiven MCP (local mcp-aiven + AIVEN_TOKEN): │
- │     agent.results/activity │              │     aiven_pg_read/write · provision · produce│
+ │     agent.results/activity │              │     aiven_pg_read/write · provision         │
  └───────────────────────────┘              │  FE gateway (REST cmds + Kafka→WS)           │
         ▲ WS/REST                            └───────────────┬────────────────────────────┘
         │                                                    ▼ Aiven Postgres+pgvector (the KG)
@@ -41,7 +41,7 @@ through Aiven MCP (§8).
 | **shared harness + file/session store** | ✅ | same container | — |
 | **FE gateway** (thin bridge) | ✅ | same container | REST + WS to the Vercel FE |
 | **Call/transcription** (LiveKit/Recall + STT) | ❌ teammate | its own container | produces `meeting.transcript` + `agent.tasks.*` |
-| **Knowledge graph** | ❌ teammate | `central-kg-api` (Lambda) | **agents go via Aiven MCP, not its HTTP API** (§8) |
+| **Knowledge graph** | ❌ teammate | `central-kg-api` (Lambda) | **agents go via Aiven MCP, not its HTTP API** (§7) |
 | **Message bus** | shared | Aiven Kafka | **Topics + envelope (§6)** |
 
 **Inbound seam (to us):** `agent.tasks.{web,data,git,…}` — produced by the teammate's call/listener side, one
@@ -71,7 +71,7 @@ Inside one process:
   separate process.
 - **File/session store** (§5) — a folder tree on a durable volume; the web agent's persistent workspace lives here.
 - **Aiven MCP** (§3) — local `mcp-aiven` for all KG/provisioning ops.
-- **FE gateway** (§9) — a small FastAPI in the same image: REST commands → Kafka, and a Kafka→WS tail for the FE.
+- **FE gateway** (§8) — a small FastAPI in the same image: REST commands → Kafka, and a Kafka→WS tail for the FE.
 
 All of these share **one warm process**: the `mcp-aiven` stdio session, the Kafka clients, and the Anthropic client
 are created once at startup and reused; tasks run as concurrent `asyncio` coroutines so a slow web build never
@@ -218,11 +218,7 @@ Envelope (every message) — single source of truth is `shared/contracts.py` (py
 
 ---
 
-## 7. (reserved)
-
----
-
-## 8. Seam B — Knowledge graph via Aiven MCP (not an HTTP client)
+## 7. Seam B — Knowledge graph via Aiven MCP (not an HTTP client)
 
 Agents reach the graph with `aiven_pg_read` / `aiven_pg_write` against the same Aiven Postgres that backs
 `central-kg-api`. **This replaces the old `kg_client.py`** — its endpoints were guesses, and per the MCP-native
@@ -262,13 +258,13 @@ for agents: `GET /query?q=`, `/subgraph`, `/entity/{id}`, `/timeline`; `POST /in
 
 ---
 
-## 9. The agent suite + gateway
+## 8. The agent suite + gateway
 
 Specialists (each a module the harness calls `run(task, ctx)`). Build **git first** (simplest, pure read), then
 **web** (best demo), then **data**; **meeting-ops** + **kg-writer** are roadmap, **reviewer** a stretch.
 
 - **git-agent** — `read_git`, `blame`, `who_changed`, `recent_changes`. Answers from the graph via `aiven_pg_read`.
-  **First milestone — §11.**
+  **First milestone — §10.**
 - **web-agent** — `build_website`, `update_website`. **Persistent workspace** (§5); codegen → build/smoke-check →
   `vercel_deploy` (Vercel API / Build Output API) → store deployment metadata. Returns a live URL.
 - **data-agent** — `analyze`, `summarize_metrics`, `query_data`. pandas/matplotlib; pulls rows via `aiven_pg_read`;
@@ -284,11 +280,11 @@ Models: Opus 4.8 for hard reasoning, Sonnet for codegen, Haiku for simple retrie
 
 ---
 
-## 10. Local dev & deploy
+## 9. Local dev & deploy
 
-- **Run the container locally**: `docker compose up` (or `uv run`) — the consumer points at Aiven Kafka, `mcp-aiven`
-  runs as a local stdio process with `AIVEN_TOKEN`, the session store is a mounted folder. Hand-publish an
-  `agent.tasks.git` message to exercise an agent without the call container.
+- **Run locally (local-first)**: `docker compose up` starts **redpanda** (local Kafka); `mcp-aiven` runs as a local
+  stdio process with `AIVEN_TOKEN`; the session store is a mounted folder. The no-creds **echo** path proves the
+  consume→harness→emit loop; `scripts/publish_task.py` stands in for the listener. Switch to Aiven Kafka by env only.
 - **Deploy**: one image → **ECS Fargate** or a **plain EC2** (rest of stack is AWS; the teammate's call container
   is already on EC2). Durable volume for `sessions/`. Secrets (`ANTHROPIC_API_KEY`, `AIVEN_TOKEN`, Kafka creds,
   `VERCEL_TOKEN`) via env / Secrets Manager — never read secret *values*, only check key presence.
@@ -296,14 +292,14 @@ Models: Opus 4.8 for hard reasoning, Sonnet for codegen, Haiku for simple retrie
 
 ---
 
-## 11. Build order
+## 10. Build order
 
 1. **Connectivity spike** *(de-risks everything; now trivially)* — local `mcp-aiven` + `AIVEN_TOKEN` → one
    `aiven_pg_read("select count(*) from nodes")` + one `aiven_kafka_topic_message_produce`. (The container model
    means this uses the static token — no auth dance.)
 2. **Shared harness skeleton** — the lifecycle (§4) + contracts additions + one consumer loop.
 3. **git-agent** — `agent.tasks.git` → `aiven_pg_read` traversal against the live `central-kg-pg` → emit
-   `agent.results` via MCP. *First runnable, MCP-native, demo-bankable milestone.*
+   `agent.results` (direct produce via the harness). *First runnable, MCP-native, demo-bankable milestone.*
 4. **web-agent** (persistent workspace → real Vercel URL) then **data-agent**.
 5. **gateway** WS bridge so the Vercel FE sees `agent.activity` + `agent.results` live.
 6. **meeting-ops** / **kg-writer** as time allows.
@@ -312,9 +308,9 @@ Each item is a short branch off `feat/agent-system`; `shared/contracts` changes 
 
 ---
 
-## 12. Scaffold realignment (`agent-system/`)
+## 11. Scaffold realignment (`agent-system/`) — done
 
-Given the container + all-MCP model, the existing scaffold needs:
+The scaffold was rebuilt to the container + all-MCP model (`agent-system/`); the list below is the record:
 - **Keep** `shared/contracts.py` (add `workspace_id`/`parent_task_id`/`idempotency_key` + `ActivityPayload`),
   `shared/config.py`, `infra/kafka_admin.py`, the uv workspace.
 - **`shared/kafka.py` is now central** (the container's long-lived consumer + the produce fallback) — keep and
@@ -325,10 +321,12 @@ Given the container + all-MCP model, the existing scaffold needs:
 - **Collapse** the per-agent `__main__.py` run-loops into the **one container**: `agents/{web,data,git}/` become
   modules exposing `run(task, ctx)`; a single `agent_runner/` entrypoint hosts the consumer + harness + gateway.
 - **Remove** `call-gateway/` and `listener-agent/` from our folder — they're the teammate's call container.
+- **Local dev added** — `docker-compose.yml` (redpanda), `.env.example`, `Makefile`, and
+  `scripts/{kafka_smoke,publish_task,spike}.py`. The no-creds echo path proves the loop; see the README.
 
 ---
 
-## 13. Open questions & risks
+## 12. Open questions & risks
 
 - **Auth risk: RESOLVED** by the container model — local `mcp-aiven` + static `AIVEN_TOKEN` removes the hosted-MCP
   OAuth-PKCE dependency.
@@ -337,8 +335,8 @@ Given the container + all-MCP model, the existing scaffold needs:
 - **Durable session volume** — EBS (EC2) / EFS (Fargate); ephemeral is OK for the demo if we re-seed.
 - **Heavy web builds** — npm/Playwright inside the container need enough CPU/mem + a build timeout; keep generated
   sites small (static or tiny Vite app) for the demo.
-- **Result emission via MCP** — model-driven `aiven_kafka_topic_message_produce`; if flaky, direct `aiokafka`
-  produce in the harness is the fallback (one direct client at our own boundary).
+- **Kafka produce is direct (decided)** — the harness emits `agent.results`/`agent.activity` with a direct
+  `aiokafka` producer (no LLM round-trip, §3). Optionally demo *one* `aiven_kafka_topic_message_produce` for the rubric.
 - **OpenSearch via MCP unverified** — pgvector is the primary retrieval path (HACKINFO: "OpenSearch not guaranteed").
 - **Naming** — confirm the call stack is LiveKit vs Recall (doesn't change our Kafka seam; just doc accuracy).
 - **`central-kg-api` gaps** — its seed CLI (tree-sitter + git → graph), OpenSearch mirror, and `kg.updates`
