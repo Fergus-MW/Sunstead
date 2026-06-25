@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { forwardParams, relayJson } from "../../_proxy";
 
 // Server-side proxy to central-kg-api's GET /subgraph.
 // Keeps the KG base URL server-side and sidesteps CORS / mixed-content.
@@ -9,30 +9,11 @@ export async function GET(req: Request) {
   const target = new URL("/subgraph", KG_API_URL);
 
   // Forward only the params the KG endpoint understands.
-  for (const key of ["q", "hops", "node_limit"]) {
-    const v = incoming.searchParams.get(key);
-    if (v) target.searchParams.set(key, v);
-  }
+  forwardParams(incoming, target, ["q", "hops", "node_limit"]);
   // `center` may repeat (one or more node ids).
   for (const c of incoming.searchParams.getAll("center")) {
     target.searchParams.append("center", c);
   }
 
-  try {
-    const res = await fetch(target, { headers: { accept: "application/json" } });
-    const body = await res.text();
-    return new NextResponse(body, {
-      status: res.status,
-      headers: { "content-type": "application/json" },
-    });
-  } catch (err) {
-    return NextResponse.json(
-      {
-        error: "Could not reach central-kg-api",
-        detail: err instanceof Error ? err.message : String(err),
-        target: target.toString(),
-      },
-      { status: 502 },
-    );
-  }
+  return relayJson(target, { headers: { accept: "application/json" } }, "Could not reach central-kg-api");
 }

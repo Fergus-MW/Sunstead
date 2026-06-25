@@ -4,20 +4,21 @@
 // Deliberately small (no remark/react-markdown) to match the repo's no-deps style;
 // renders gracefully on *partial* input, so it's safe on a still-streaming buffer.
 
-import { Fragment, type ReactNode } from "react";
+import { Fragment, useMemo, type ReactNode } from "react";
 
 // --- inline: `code`, **bold**, *italic*, [text](url) -------------------------
 // Code is matched first (highest precedence) so markdown inside it stays literal.
-const INLINE =
-  /(`[^`]+`)|(\*\*[^*]+\*\*)|(\*[^*\n]+\*)|(\[[^\]]+\]\([^)\s]+\))/g;
+const INLINE = /(`[^`]+`)|(\*\*[^*]+\*\*)|(\*[^*\n]+\*)|(\[[^\]]+\]\([^)\s]+\))/g;
 
 function renderInline(text: string, keyBase: string): ReactNode[] {
   const out: ReactNode[] = [];
   let last = 0;
   let m: RegExpExecArray | null;
-  INLINE.lastIndex = 0;
+  // A fresh regex per call: renderInline recurses into bold/italic content, and a
+  // shared /g regex's lastIndex would be clobbered by the inner call mid-iteration.
+  const re = new RegExp(INLINE.source, INLINE.flags);
   let i = 0;
-  while ((m = INLINE.exec(text))) {
+  while ((m = re.exec(text))) {
     if (m.index > last) out.push(text.slice(last, m.index));
     const tok = m[0];
     const key = `${keyBase}-${i++}`;
@@ -65,6 +66,14 @@ function renderInline(text: string, keyBase: string): ReactNode[] {
 
 // --- blocks ------------------------------------------------------------------
 export default function Markdown({ text, className }: { text: string; className?: string }) {
+  // Parsing re-splits and re-regexes the whole buffer. On a streaming transcript this
+  // runs on every committed delta, so memoize on `text` — a parent re-render (the 2s
+  // clock tick, a sibling card streaming) then reuses the parse instead of redoing it.
+  const blocks = useMemo<ReactNode[]>(() => parseBlocks(text), [text]);
+  return <div className={className}>{blocks}</div>;
+}
+
+function parseBlocks(text: string): ReactNode[] {
   const lines = text.replace(/\r\n/g, "\n").split("\n");
   const blocks: ReactNode[] = [];
   let i = 0;
@@ -175,5 +184,5 @@ export default function Markdown({ text, className }: { text: string; className?
     );
   }
 
-  return <div className={className}>{blocks}</div>;
+  return blocks;
 }

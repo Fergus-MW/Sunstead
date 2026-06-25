@@ -39,12 +39,38 @@ export function useStream({ url, meetingId, max = 500 }: Options = {}) {
   const wsRef = useRef<WebSocket | null>(null);
   const retryRef = useRef(0);
   const closedRef = useRef(false);
+  // Source-of-truth for the folded transcripts. Deltas land here synchronously (cheap,
+  // no render); a rAF then commits this into React state. Tokens stream faster than the
+  // screen refreshes and each WS frame is its own macrotask (so React can't batch them),
+  // which without coalescing means one full re-render per token — the path that pegged
+  // the main thread until Chrome killed the tab (RESULT_CODE_HUNG).
+  const tracesRef = useRef<Record<string, TaskTrace>>({});
 
   const base = url ?? DEFAULT_WS;
 
   useEffect(() => {
     closedRef.current = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let rafId: number | null = null;
+    let timerId: ReturnType<typeof setTimeout> | null = null;
+
+    // Commit accumulated trace deltas, then disarm both handles.
+    const flush = () => {
+      if (rafId != null) cancelAnimationFrame(rafId);
+      if (timerId != null) clearTimeout(timerId);
+      rafId = null;
+      timerId = null;
+      setTraces(tracesRef.current);
+    };
+    // Coalesce: commit at most once per frame. The rAF aligns commits with paint; the
+    // timer is a fallback because rAF is *paused* in a backgrounded tab — without it a
+    // hidden dashboard would never commit, then dump everything at once on return (and
+    // its liveness/"stalled" read would go stale meanwhile). Whichever fires first flushes.
+    const scheduleFlush = () => {
+      if (rafId != null || timerId != null) return;
+      rafId = requestAnimationFrame(flush);
+      timerId = setTimeout(flush, 250);
+    };
 
     const connect = () => {
       if (closedRef.current) return;
@@ -73,27 +99,27 @@ export function useStream({ url, meetingId, max = 500 }: Options = {}) {
             // skipping seq <= lastSeq drops replayed deltas (ring replay on reconnect)
             // without an unbounded seen-id set — Kafka keys by task_id, so order holds.
             const p = env.payload as unknown as TracePayload;
-            setTraces((prev) => {
-              const cur = prev[p.task_id] ?? { thinking: "", text: "", lastSeq: 0, ts: 0 };
-              if (p.seq <= cur.lastSeq) return prev;
-              const next: TaskTrace = {
-                thinking: cur.thinking + (p.phase === "thinking" ? p.delta : ""),
-                text: cur.text + (p.phase === "text" ? p.delta : ""),
-                lastSeq: p.seq,
-                ts: Date.parse(env.ts) || Date.now(),
-              };
-              const merged = { ...prev, [p.task_id]: next };
-              // Bound the map: traces accrue automatically (unlike click-bounded sets), so a
-              // dashboard left open all day would grow forever. Past MAX_TRACES, evict the
-              // least-recently-updated transcript. Cap >> concurrent tasks, so live ones survive.
-              const keys = Object.keys(merged);
-              if (keys.length > MAX_TRACES) {
-                let oldest = keys[0];
-                for (const k of keys) if (merged[k].ts < merged[oldest].ts) oldest = k;
-                delete merged[oldest];
-              }
-              return merged;
-            });
+            const prev = tracesRef.current;
+            const cur = prev[p.task_id] ?? { thinking: "", text: "", lastSeq: 0, ts: 0 };
+            if (p.seq <= cur.lastSeq) return; // replayed delta — ignore
+            const next: TaskTrace = {
+              thinking: cur.thinking + (p.phase === "thinking" ? p.delta : ""),
+              text: cur.text + (p.phase === "text" ? p.delta : ""),
+              lastSeq: p.seq,
+              ts: Date.parse(env.ts) || Date.now(),
+            };
+            const merged = { ...prev, [p.task_id]: next };
+            // Bound the map: traces accrue automatically (unlike click-bounded sets), so a
+            // dashboard left open all day would grow forever. Past MAX_TRACES, evict the
+            // least-recently-updated transcript. Cap >> concurrent tasks, so live ones survive.
+            const keys = Object.keys(merged);
+            if (keys.length > MAX_TRACES) {
+              let oldest = keys[0];
+              for (const k of keys) if (merged[k].ts < merged[oldest].ts) oldest = k;
+              delete merged[oldest];
+            }
+            tracesRef.current = merged;
+            scheduleFlush();
             return;
           }
           setEvents((prev) => {
@@ -133,6 +159,10 @@ export function useStream({ url, meetingId, max = 500 }: Options = {}) {
     return () => {
       closedRef.current = true;
       if (timer) clearTimeout(timer);
+      // Commit any pending deltas before tearing down so a flush scheduled but not yet
+      // fired (e.g. on a meetingId change) isn't dropped. On a real unmount the setState
+      // is a harmless no-op.
+      if (rafId != null || timerId != null) flush();
       try {
         wsRef.current?.close();
       } catch {}
@@ -141,6 +171,7 @@ export function useStream({ url, meetingId, max = 500 }: Options = {}) {
 
   const clear = () => {
     setEvents([]);
+    tracesRef.current = {};
     setTraces({});
   };
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AppHeader from "../_components/AppHeader";
 import ForceGraph from "./ForceGraph";
 import NodePanel from "./NodePanel";
@@ -30,18 +30,31 @@ export default function GraphExplorer() {
   const [hiddenTypes, setHiddenTypes] = useState<Set<string>>(new Set());
   const [display, setDisplay] = useState<Display>(DEFAULT_DISPLAY);
 
+  // Sequence overlapping fetches: a monotonic request id (+ an AbortController to
+  // cancel the prior in-flight call) so a slow earlier search can't resolve last
+  // and clobber a newer view. Every view-replacing load bumps reqRef; results from
+  // a superseded request are dropped.
+  const reqRef = useRef(0);
+  const abortRef = useRef<AbortController | null>(null);
+
   const loadOverview = useCallback(async () => {
+    abortRef.current?.abort();
+    const ac = new AbortController();
+    abortRef.current = ac;
+    const req = ++reqRef.current;
     setLoad({ kind: "loading" });
     setSelected(null);
     try {
-      const res = await fetch(`/api/graph/overview?seeds=14&hops=1&node_limit=140`);
-      const data = await res.json();
+      const res = await fetch(`/api/graph/overview?seeds=14&hops=1&node_limit=140`, { signal: ac.signal });
+      const data = await res.json().catch(() => ({}));
+      if (req !== reqRef.current) return; // superseded by a newer request
       if (!res.ok) {
         setLoad({ kind: "error", message: data.error ?? "Could not load overview" });
         return;
       }
       setLoad({ kind: "ok", data, source: "overview" });
     } catch (err) {
+      if (req !== reqRef.current) return; // superseded / aborted
       setLoad({ kind: "error", message: err instanceof Error ? err.message : "Network error" });
     }
   }, []);
@@ -55,18 +68,24 @@ export default function GraphExplorer() {
   }, [loadOverview]);
 
   const runSearch = useCallback(async (q: string, h: number) => {
+    abortRef.current?.abort();
+    const ac = new AbortController();
+    abortRef.current = ac;
+    const req = ++reqRef.current;
     setLoad({ kind: "loading" });
     setSelected(null);
     try {
       const params = new URLSearchParams({ q, hops: String(h), node_limit: "120" });
-      const res = await fetch(`/api/graph/subgraph?${params}`);
-      const data = await res.json();
+      const res = await fetch(`/api/graph/subgraph?${params}`, { signal: ac.signal });
+      const data = await res.json().catch(() => ({}));
+      if (req !== reqRef.current) return; // superseded by a newer request
       if (!res.ok) {
         setLoad({ kind: "error", message: data.error ?? "Search failed" });
         return;
       }
       setLoad({ kind: "ok", data, source: "search" });
     } catch (err) {
+      if (req !== reqRef.current) return; // superseded / aborted
       setLoad({ kind: "error", message: err instanceof Error ? err.message : "Network error" });
     }
   }, []);
@@ -81,13 +100,17 @@ export default function GraphExplorer() {
     runSearch(q, hops);
   }
 
-  // Expand a node's neighborhood into the current view on demand.
+  // Expand a node's neighborhood into the current view on demand. Augments the
+  // current view rather than replacing it, so it captures (not bumps) the request
+  // id and bails if a load has since superseded the view it was merging into.
   const expand = useCallback(async (node: GraphNode) => {
+    const req = reqRef.current;
     try {
       const res = await fetch(`/api/graph/entity/${node.id}?hops=1&limit=60`);
-      const data = await res.json();
-      if (!res.ok) return;
-      const incoming: Subgraph = data.subgraph;
+      const data = await res.json().catch(() => ({}));
+      if (req !== reqRef.current) return; // a load replaced the view meanwhile
+      const incoming: Subgraph | undefined = data?.subgraph;
+      if (!res.ok || !incoming?.nodes || !incoming?.edges) return;
       setLoad((cur) => {
         if (cur.kind !== "ok") return cur;
         const nodeMap = new Map(cur.data.nodes.map((n) => [n.id, n]));

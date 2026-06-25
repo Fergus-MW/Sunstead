@@ -1,12 +1,16 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AppHeader from "../_components/AppHeader";
 import Markdown from "../_components/Markdown";
 import { fmtTime, relativeTime } from "../_components/format";
 import AskBox from "./AskBox";
 import { useStream, type ConnState, type TaskTrace } from "./useStream";
 import { eventStyle, type Artifact, type Envelope, type Verdict } from "./types";
+
+// One recorded step in a task's lifecycle — the granular progression (delegated →
+// received → working… → done) that used to be collapsed into a single latest status.
+type ActivityStep = { status: string; detail?: string; ts: string };
 
 type TaskRow = {
   taskId: string;
@@ -20,7 +24,19 @@ type TaskRow = {
   verdict?: Verdict | null;
   lastTs: string;
   activityCount: number;
+  steps: ActivityStep[]; // oldest → newest, for the per-card timeline
 };
+
+// Append a step, collapsing a repeat of the previous status+detail into a ts bump so a
+// chatty agent emitting the same "querying…" activity N times reads as one live step.
+function pushStep(steps: ActivityStep[], step: ActivityStep): void {
+  const last = steps[steps.length - 1];
+  if (last && last.status === step.status && last.detail === step.detail) {
+    last.ts = step.ts;
+    return;
+  }
+  steps.push(step);
+}
 
 const STATUS_DOT: Record<ConnState, string> = {
   connecting: "bg-amber-300",
@@ -30,6 +46,15 @@ const STATUS_DOT: Record<ConnState, string> = {
 
 // A task in flight with no update for this long is "stuck" — surfaced in the digest.
 const STUCK_MS = 30_000;
+
+// Fallback meeting id when the page is opened without a ?meeting_id= param.
+const DEFAULT_MEETING_ID = "mtg_dev";
+
+// Newest-first comparator for ISO timestamps. Compare as epoch millis, not as
+// strings: envelopes come from different services (gateway vs runner) whose ts
+// may differ in zone/precision (`Z` vs offset, millis vs micros), which a raw
+// string compare would silently misorder.
+const byTsDesc = (a: string, b: string) => new Date(b).getTime() - new Date(a).getTime();
 
 // Liveness age: a long-streaming task stays "live" via its trace deltas even when no
 // activity event fires, so pass the task's last trace ts to avoid a false "stalled".
@@ -56,6 +81,7 @@ function deriveTasks(events: Envelope[]): TaskRow[] {
         artifacts: [],
         lastTs: env.ts,
         activityCount: 0,
+        steps: [],
       } as TaskRow);
 
     if (env.type === "task.create") {
@@ -64,14 +90,19 @@ function deriveTasks(events: Envelope[]): TaskRow[] {
       // a later "received"/activity overwrites the status as the runner picks it up.
       if (typeof p.intent === "string") row.intentHint = p.intent;
       row.latestStatus = "dispatched";
+      pushStep(row.steps, { status: "dispatched", ts: env.ts });
     } else if (env.type === "activity") {
       const status = (p.status as string) ?? row.latestStatus;
+      const detail = typeof p.detail === "string" ? p.detail : undefined;
       // The "received" activity carries the intent as its detail — keep it as a label,
       // not as the running status detail (the next activity would overwrite it anyway).
-      if (status === "received" && typeof p.detail === "string") row.intentHint = p.detail;
-      else if (typeof p.detail === "string") row.detail = p.detail;
+      if (status === "received" && detail) row.intentHint = detail;
+      else if (detail) row.detail = detail;
       row.latestStatus = status;
       row.activityCount += 1;
+      // Record the step itself so the card can show the whole progression, not just the
+      // latest. "received" carries the intent as detail (now the hint) — omit it here.
+      pushStep(row.steps, { status, detail: status === "received" ? undefined : detail, ts: env.ts });
     } else if (env.type === "task.completed" || env.type === "task.failed") {
       row.terminal = env.type === "task.completed" ? "completed" : "failed";
       row.latestStatus = (p.status as string) ?? row.terminal;
@@ -79,6 +110,7 @@ function deriveTasks(events: Envelope[]): TaskRow[] {
       row.artifacts = (p.artifacts as Artifact[]) ?? [];
       row.error = (p.error as string) ?? null;
       row.verdict = (p.verdict as Verdict) ?? row.verdict ?? null;
+      pushStep(row.steps, { status: row.latestStatus, detail: row.error ?? undefined, ts: env.ts });
     } else if (env.type === "verdict") {
       // The grounding check runs off the critical path (DESIGN §7), so the verdict arrives
       // as its own event a beat after the answer — apply it without touching terminal state.
@@ -91,7 +123,7 @@ function deriveTasks(events: Envelope[]): TaskRow[] {
     row.lastTs = env.ts;
     map.set(taskId, row);
   }
-  return [...map.values()].sort((a, b) => (a.lastTs < b.lastTs ? 1 : -1));
+  return [...map.values()].sort((a, b) => byTsDesc(a.lastTs, b.lastTs));
 }
 
 // A feed chain: one task's lifecycle (dispatched → received → activity… → done) as a
@@ -123,7 +155,7 @@ function deriveChains(events: Envelope[]): FeedChain[] {
   }
   return [...map.values()]
     .map((c) => ({ ...c, steps: c.steps.slice().reverse() })) // newest-first → oldest-first
-    .sort((a, b) => (a.latestTs < b.latestTs ? 1 : -1));
+    .sort((a, b) => byTsDesc(a.latestTs, b.latestTs));
 }
 
 // One step's display: a colored kind + the human-readable status + its detail/text.
@@ -240,11 +272,30 @@ function StreamBox({
   );
 }
 
+// While a transcript is still streaming, only the tail is on screen (the boxes are
+// max-h-* and auto-scroll to the bottom), so we hand Markdown just the tail. That caps
+// each re-parse at O(tail) instead of O(full buffer) — otherwise a long answer's
+// per-token parse cost grows without bound. The full text is rendered once it's terminal.
+const STREAM_TAIL = 4000;
+function streamTail(s: string): string {
+  if (s.length <= STREAM_TAIL) return s;
+  const cut = s.length - STREAM_TAIL;
+  // Prefer a blank-line (paragraph) boundary so the window never opens mid-block — a
+  // code fence or list item started above the cut would otherwise render as plain text.
+  // Fall back to a line boundary, then a hard cut, if neither is found in the window.
+  const para = s.indexOf("\n\n", cut);
+  if (para !== -1) return s.slice(para + 2);
+  const nl = s.indexOf("\n", cut);
+  return s.slice(nl === -1 ? cut : nl + 1);
+}
+
 // Live reasoning + output for a task: summarized chain-of-thought streams above the
 // answer as the model generates (agent.trace). Collapsible; open by default.
 function TraceView({ trace, terminal }: { trace?: TaskTrace; terminal?: boolean }) {
   if (!trace || (!trace.thinking && !trace.text)) return null;
   const streaming = !terminal;
+  const thinking = streaming ? streamTail(trace.thinking) : trace.thinking;
+  const text = streaming ? streamTail(trace.text) : trace.text;
   return (
     <details open className="group mt-2">
       <summary className="flex cursor-pointer select-none list-none items-center gap-1.5 text-[9px] uppercase tracking-[0.2em] text-[#b69cff]/70">
@@ -259,7 +310,7 @@ function TraceView({ trace, terminal }: { trace?: TaskTrace; terminal?: boolean 
       <div className="mt-2 space-y-2">
         {trace.thinking && (
           <StreamBox
-            body={trace.thinking}
+            body={thinking}
             streaming={streaming && !trace.text}
             className="max-h-32 overflow-y-auto whitespace-pre-wrap rounded border border-[#b69cff]/15 bg-[#b69cff]/[0.06] p-2 font-mono text-[10px] italic leading-relaxed text-[#f3ead3]/55"
           />
@@ -270,13 +321,61 @@ function TraceView({ trace, terminal }: { trace?: TaskTrace; terminal?: boolean 
               Output{streaming ? " · streaming" : ""}
             </div>
             <StreamBox
-              body={trace.text}
+              body={text}
               streaming={streaming}
               render={(b) => <Markdown text={b} className="space-y-1.5" />}
               className="max-h-40 space-y-1.5 overflow-y-auto break-words [overflow-wrap:anywhere] rounded border border-[#f3ead3]/10 bg-black/40 p-2 text-[10px] leading-relaxed text-[#f3ead3]/75"
             />
           </div>
         )}
+      </div>
+    </details>
+  );
+}
+
+// Dot color for one step. Terminal states read by outcome; in-flight steps glow amber,
+// with the most recent one brighter so the eye lands on "where it is now".
+function stepColor(status: string, isLast: boolean): string {
+  if (status === "completed") return "#6fcf97";
+  if (status === "failed" || status === "cancelled") return "#e06f6f";
+  return isLast ? "#ffd57a" : "#f3ead3"; // current step vs a settled past one
+}
+
+// The per-task step timeline: the in-between progression (delegated → received →
+// working… → done), not just the latest status. Collapsible; open while the task is
+// live so you can watch it move, collapsed once terminal (the result is the focus then).
+function StepsTimeline({ steps, terminal }: { steps: ActivityStep[]; terminal?: boolean }) {
+  if (steps.length <= 1) return null; // a lone "dispatched" step is just the status pill
+  return (
+    <details open={!terminal} className="group mt-2">
+      <summary className="flex cursor-pointer select-none list-none items-center gap-1.5 text-[9px] uppercase tracking-[0.2em] text-[#f3ead3]/45">
+        <span className="inline-block transition-transform group-open:rotate-90" aria-hidden>
+          ▸
+        </span>
+        Steps
+        <span className="text-[#f3ead3]/30">({steps.length})</span>
+      </summary>
+      <div className="ml-[3px] mt-2 max-h-44 overflow-y-auto border-l border-[#f3ead3]/10 pl-3">
+        {steps.map((s, i) => {
+          const isLast = i === steps.length - 1;
+          const color = stepColor(s.status, isLast);
+          return (
+            <div key={`${s.ts}:${i}`} className="relative py-0.5 text-[11px] leading-snug">
+              <span
+                className={`absolute -left-[15px] top-[6px] inline-block h-1.5 w-1.5 rounded-full ring-2 ring-[#0b1a17] ${
+                  isLast && !terminal ? "animate-pulse" : ""
+                }`}
+                style={{ background: color }}
+              />
+              <span className="uppercase tracking-wide" style={{ color }}>
+                {s.status}
+              </span>
+              {s.detail && (
+                <span className="break-words [overflow-wrap:anywhere] text-[#f3ead3]/55"> · {s.detail}</span>
+              )}
+            </div>
+          );
+        })}
       </div>
     </details>
   );
@@ -371,6 +470,114 @@ function FeedChainView({ chain, now }: { chain: FeedChain; now: number }) {
   );
 }
 
+// One agent card. Memoized so a streamed trace delta only re-renders the card whose
+// `trace` prop actually changed — without this, every token re-rendered all cards.
+// `now` ticks every 2s (relative-time refresh); that's a cheap, infrequent re-render.
+const TaskCard = memo(function TaskCard({
+  row,
+  trace,
+  now,
+  isStopping,
+  onStop,
+}: {
+  row: TaskRow;
+  trace?: TaskTrace;
+  now: number;
+  isStopping: boolean;
+  onStop: (taskId: string) => void;
+}) {
+  return (
+    <div
+      className="rounded-lg border border-[#f3ead3]/12 bg-black/25 p-3 transition-colors hover:border-[#f3ead3]/25"
+      style={{ borderLeft: `3px solid ${accentFor(row)}` }}
+    >
+      <div className="flex items-center gap-2">
+        {row.intentHint && (
+          <span className="shrink-0 rounded bg-[#f3ead3]/8 px-1.5 py-0.5 text-[10px] text-[#f3ead3]/65">
+            {row.intentHint}
+          </span>
+        )}
+        <span className="truncate font-mono text-[10px] text-[#f3ead3]/35">{row.taskId}</span>
+        <span className="ml-auto flex shrink-0 items-center gap-1.5">
+          <VerdictBadge v={row.verdict} />
+          <StatusPill row={row} />
+        </span>
+      </div>
+
+      {row.detail && <p className="mt-1.5 text-xs text-[#f3ead3]/60">{row.detail}</p>}
+
+      <StepsTimeline steps={row.steps} terminal={!!row.terminal} />
+
+      <TraceView trace={trace} terminal={!!row.terminal} />
+
+      {row.error && (
+        <p className="mt-2 rounded border border-rose-300/20 bg-rose-900/20 p-1.5 text-xs text-rose-200/90">
+          {row.error}
+        </p>
+      )}
+      {row.result && Object.keys(row.result).length > 0 && <ResultView result={row.result} />}
+
+      {row.artifacts.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {row.artifacts.map((a) =>
+            a.kind === "image" ? (
+              <a key={`${a.kind}:${a.value}`} href={a.value} target="_blank" rel="noreferrer" className="block w-full">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={a.value}
+                  alt="chart"
+                  className="mt-1 max-h-80 w-full rounded-lg border border-[#f3ead3]/15 bg-[#0b1a17] object-contain"
+                />
+              </a>
+            ) : a.kind === "url" ? (
+              <a
+                key={`${a.kind}:${a.value}`}
+                href={a.value}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex max-w-full items-center gap-1 truncate rounded-full border border-sky-300/30 bg-sky-900/20 px-2 py-0.5 text-xs text-sky-200 hover:border-sky-300/60 hover:text-sky-100"
+              >
+                ↗ {a.value.replace(/^https?:\/\//, "")}
+              </a>
+            ) : (
+              <span
+                key={`${a.kind}:${a.value}`}
+                className="truncate rounded-full border border-[#f3ead3]/15 px-2 py-0.5 text-xs text-[#f3ead3]/70"
+              >
+                {a.kind}: {a.value}
+              </span>
+            ),
+          )}
+        </div>
+      )}
+
+      <div className="mt-2 flex items-center gap-2 text-[10px] text-[#f3ead3]/30">
+        <span title={fmtTime(row.lastTs)}>{relativeTime(row.lastTs, now)}</span>
+        <span>·</span>
+        <span>
+          {row.activityCount} update{row.activityCount === 1 ? "" : "s"}
+        </span>
+        {!row.terminal && (
+          <span className="ml-auto flex items-center gap-1.5">
+            {liveAgeMs(row.lastTs, trace?.ts ?? 0, now) > STUCK_MS && (
+              <span className="rounded-full bg-rose-900/30 px-1.5 text-rose-300">stalled</span>
+            )}
+            <button
+              onClick={() => onStop(row.taskId)}
+              disabled={isStopping}
+              aria-label={`Stop task ${row.taskId}`}
+              title="Cancel this task"
+              className="rounded-full border border-rose-300/30 px-2 py-0.5 text-rose-200/80 hover:border-rose-300/60 hover:text-rose-100 disabled:opacity-40"
+            >
+              {isStopping ? "stopping…" : "■ stop"}
+            </button>
+          </span>
+        )}
+      </div>
+    </div>
+  );
+});
+
 export default function Dashboard() {
   const [meetingId, setMeetingId] = useState("");
   // A 2s tick so relative times and "stuck" status stay live even when no events arrive.
@@ -416,30 +623,36 @@ export default function Dashboard() {
   // Operator stop (docs/DESIGN.md §7): POST to the control channel; the cancelled result
   // arrives back over the WS like any other terminal state. Optimistically disable the button.
   const [stopping, setStopping] = useState<Set<string>>(new Set());
-  const unstop = (taskId: string) =>
+  const unstop = useCallback((taskId: string) => {
     setStopping((s) => {
       if (!s.has(taskId)) return s;
       const n = new Set(s);
       n.delete(taskId);
       return n;
     });
-  async function stop(taskId: string) {
-    setStopping((s) => new Set(s).add(taskId));
-    try {
-      const res = await fetch("/api/control", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ task_id: taskId, meeting_id: meetingId || "mtg_dev", reason: "operator stop" }),
-      });
-      // Leave "stopping…" showing until the task goes terminal — the button only renders while
-      // in-flight, so it unmounts when the cancelled result lands on the WS (no cleanup needed).
-      if (!res.ok) throw new Error(`control ${res.status}`);
-    } catch {
-      // The request never reached the gateway — re-enable the button so the operator can retry,
-      // rather than leaving it stuck disabled with no cancellation in flight.
-      unstop(taskId);
-    }
-  }
+  }, []);
+  // Stable across renders so the memoized TaskCard isn't re-rendered by a new handler
+  // identity on every streamed token.
+  const stop = useCallback(
+    async (taskId: string) => {
+      setStopping((s) => new Set(s).add(taskId));
+      try {
+        const res = await fetch("/api/control", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ task_id: taskId, meeting_id: meetingId || DEFAULT_MEETING_ID, reason: "operator stop" }),
+        });
+        // Leave "stopping…" showing until the task goes terminal — the button only renders while
+        // in-flight, so it unmounts when the cancelled result lands on the WS (no cleanup needed).
+        if (!res.ok) throw new Error(`control ${res.status}`);
+      } catch {
+        // The request never reached the gateway — re-enable the button so the operator can retry,
+        // rather than leaving it stuck disabled with no cancellation in flight.
+        unstop(taskId);
+      }
+    },
+    [meetingId, unstop],
+  );
 
   const statusBadge = (
     <span className="flex items-center gap-1.5 text-[10px] uppercase tracking-[0.3em] text-[#f3ead3]/50">
@@ -505,93 +718,14 @@ export default function Dashboard() {
             ) : (
               <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(340px,1fr))]">
                 {tasks.map((row) => (
-                  <div
+                  <TaskCard
                     key={row.taskId}
-                    className="rounded-lg border border-[#f3ead3]/12 bg-black/25 p-3 transition-colors hover:border-[#f3ead3]/25"
-                    style={{ borderLeft: `3px solid ${accentFor(row)}` }}
-                  >
-                    <div className="flex items-center gap-2">
-                      {row.intentHint && (
-                        <span className="shrink-0 rounded bg-[#f3ead3]/8 px-1.5 py-0.5 text-[10px] text-[#f3ead3]/65">
-                          {row.intentHint}
-                        </span>
-                      )}
-                      <span className="truncate font-mono text-[10px] text-[#f3ead3]/35">{row.taskId}</span>
-                      <span className="ml-auto flex shrink-0 items-center gap-1.5">
-                        <VerdictBadge v={row.verdict} />
-                        <StatusPill row={row} />
-                      </span>
-                    </div>
-
-                    {row.detail && <p className="mt-1.5 text-xs text-[#f3ead3]/60">{row.detail}</p>}
-
-                    <TraceView trace={traces[row.taskId]} terminal={!!row.terminal} />
-
-                    {row.error && (
-                      <p className="mt-2 rounded border border-rose-300/20 bg-rose-900/20 p-1.5 text-xs text-rose-200/90">
-                        {row.error}
-                      </p>
-                    )}
-                    {row.result && Object.keys(row.result).length > 0 && <ResultView result={row.result} />}
-
-                    {row.artifacts.length > 0 && (
-                      <div className="mt-2 flex flex-wrap gap-1.5">
-                        {row.artifacts.map((a) =>
-                          a.kind === "image" ? (
-                            <a key={`${a.kind}:${a.value}`} href={a.value} target="_blank" rel="noreferrer" className="block w-full">
-                              {/* eslint-disable-next-line @next/next/no-img-element */}
-                              <img
-                                src={a.value}
-                                alt="chart"
-                                className="mt-1 max-h-80 w-full rounded-lg border border-[#f3ead3]/15 bg-[#0b1a17] object-contain"
-                              />
-                            </a>
-                          ) : a.kind === "url" ? (
-                            <a
-                              key={`${a.kind}:${a.value}`}
-                              href={a.value}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="inline-flex max-w-full items-center gap-1 truncate rounded-full border border-sky-300/30 bg-sky-900/20 px-2 py-0.5 text-xs text-sky-200 hover:border-sky-300/60 hover:text-sky-100"
-                            >
-                              ↗ {a.value.replace(/^https?:\/\//, "")}
-                            </a>
-                          ) : (
-                            <span
-                              key={`${a.kind}:${a.value}`}
-                              className="truncate rounded-full border border-[#f3ead3]/15 px-2 py-0.5 text-xs text-[#f3ead3]/70"
-                            >
-                              {a.kind}: {a.value}
-                            </span>
-                          ),
-                        )}
-                      </div>
-                    )}
-
-                    <div className="mt-2 flex items-center gap-2 text-[10px] text-[#f3ead3]/30">
-                      <span title={fmtTime(row.lastTs)}>{relativeTime(row.lastTs, now)}</span>
-                      <span>·</span>
-                      <span>
-                        {row.activityCount} update{row.activityCount === 1 ? "" : "s"}
-                      </span>
-                      {!row.terminal && (
-                        <span className="ml-auto flex items-center gap-1.5">
-                          {liveAgeMs(row.lastTs, traces[row.taskId]?.ts ?? 0, now) > STUCK_MS && (
-                            <span className="rounded-full bg-rose-900/30 px-1.5 text-rose-300">stalled</span>
-                          )}
-                          <button
-                            onClick={() => stop(row.taskId)}
-                            disabled={stopping.has(row.taskId)}
-                            aria-label={`Stop task ${row.taskId}`}
-                            title="Cancel this task"
-                            className="rounded-full border border-rose-300/30 px-2 py-0.5 text-rose-200/80 hover:border-rose-300/60 hover:text-rose-100 disabled:opacity-40"
-                          >
-                            {stopping.has(row.taskId) ? "stopping…" : "■ stop"}
-                          </button>
-                        </span>
-                      )}
-                    </div>
-                  </div>
+                    row={row}
+                    trace={traces[row.taskId]}
+                    now={now}
+                    isStopping={stopping.has(row.taskId)}
+                    onStop={stop}
+                  />
                 ))}
               </div>
             )}
@@ -601,7 +735,7 @@ export default function Dashboard() {
         {/* Right rail: dispatch + raw feed */}
         <aside className="flex w-96 shrink-0 flex-col border-l border-[#f3ead3]/10">
           <div className="border-b border-[#f3ead3]/10 p-4">
-            <AskBox meetingId={meetingId || "mtg_dev"} />
+            <AskBox meetingId={meetingId || DEFAULT_MEETING_ID} />
           </div>
           <div className="flex items-center justify-between border-b border-[#f3ead3]/10 px-4 py-2">
             <h2 className="text-[10px] uppercase tracking-[0.3em] text-[#f3ead3]/50">

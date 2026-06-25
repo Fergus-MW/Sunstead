@@ -23,15 +23,22 @@ the horizon over a layered pine forest.
   `ForceGraph.tsx` is the renderer (repulsion + link springs + centering,
   drag/zoom/pan, hover highlight, click-to-select); `page.tsx` is the
   search + detail-panel + legend shell; `types.ts` mirrors the KG models.
-- `src/app/dashboard/` — **agent dashboard** (`/dashboard`). Live event
-  feed + task status board + ask box, over the `agent-system` gateway.
-  `useStream.ts` is the auto-reconnecting WS hook; `AskBox.tsx` dispatches
-  tasks; `page.tsx` folds the stream into a per-task board.
+- `src/app/dashboard/` — **mission-control agent dashboard** (`/dashboard`).
+  A live **digest bar** (active/stuck/grounded/flagged) over a tiled task
+  board with **verdict badges**, collapsible **streamed reasoning**, per-card
+  **stop** buttons, and an ask box — over the `agent-system` gateway.
+  `useStream.ts` is the auto-reconnecting WS hook (folds `agent.trace` deltas
+  into a per-task reasoning panel, coalesced once per frame); `AskBox.tsx`
+  dispatches tasks; `page.tsx` folds the stream into a per-task board (each
+  card a memoized component so token-streaming doesn't re-render the fleet).
+- `src/app/_components/Markdown.tsx` — a zero-dependency Markdown renderer
+  for streamed LLM output (memoized block parsing; used by the dashboard).
 - `src/app/api/graph/` — server-side proxies to `central-kg-api`
-  (`/subgraph`, `/entity/{id}`) so the KG base URL and CORS stay
+  (`/overview`, `/subgraph`, `/entity/{id}`) so the KG base URL and CORS stay
   server-side. Configure via `KG_API_URL` (see `.env.example`).
-- `src/app/api/tasks/` — server-side proxy to the gateway's `POST /tasks`
-  (the ask box). Configure via `GATEWAY_URL`.
+- `src/app/api/tasks/` + `src/app/api/control/` — server-side proxies to the
+  gateway's `POST /tasks` (the ask box) and `POST /control` (the stop button).
+  Configure via `GATEWAY_URL`.
 
 ## Knowledge-graph explorer (`/graph`)
 
@@ -49,10 +56,15 @@ graph — see [`../central-kg-api`](../central-kg-api).
 The admin surface over the live system. It opens a WebSocket to the
 `agent-system` gateway's `WS /stream` and renders:
 
+- **Digest bar** — a client-side conductor: active / stuck / grounded /
+  flagged / done / failed, recomputed on a 2s tick.
 - **Live feed** — every `agent.results` / `agent.activity` envelope as it
   arrives (newest first, ring-buffered).
 - **Task board** — the same stream folded into one card per `task_id`
-  (status, detail, result JSON, artifact links like a deployed URL).
+  (status, detail, result, artifact links like a deployed URL), with a
+  **verdict badge** (grounded ✓ N rows / unsupported), collapsible
+  **streamed reasoning** (thinking + output, markdown-rendered), and a
+  **stop** button (`POST /api/control` → gateway → cancels the running task).
 - **Ask box** — pick an intent + JSON args and dispatch a `task.create`
   via `POST /api/tasks` → the gateway → Kafka.
 
