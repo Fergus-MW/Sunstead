@@ -33,7 +33,7 @@ class RecallClient:
         video/audio (out to the meeting) and publishes the meeting's audio back
         into the room for the agent to hear.
         """
-        payload = {
+        payload: dict[str, Any] = {
             "meeting_url": meeting_url,
             "bot_name": self.settings.bot_name,
             "output_media": {
@@ -43,6 +43,11 @@ class RecallClient:
                 }
             },
         }
+        # Bot variant = the only frame-rate lever Recall exposes (it's discrete):
+        # "web" renders the camera webpage at ~15 fps, "web_4_core" at ~30 fps.
+        # Keyed per meeting platform; we only join Google Meet.
+        if self.settings.recall_bot_variant:
+            payload["variant"] = {"google_meet": self.settings.recall_bot_variant}
         async with self._http() as client:
             resp = await client.post("/api/v1/bot", json=payload)
             resp.raise_for_status()

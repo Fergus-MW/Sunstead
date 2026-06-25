@@ -28,8 +28,13 @@ class Settings(BaseSettings):
 
     # ── Recall.ai (meeting transport) ──
     recall_api_key: str = Field(default="", alias="RECALL_API_KEY")
-    recall_region: str = Field(default="us-east-1", alias="RECALL_REGION")
+    recall_region: str = Field(default="eu-central-1", alias="RECALL_REGION")
     bot_name: str = Field(default="Aino", alias="BOT_NAME")
+    # Recall bot variant — the only fps lever in the pipeline, and it's discrete:
+    # "web" (default) renders the camera webpage at ~15 fps; "web_4_core" (4-core
+    # machine) sustains ~30 fps at a higher per-bot cost. No arbitrary value (e.g.
+    # 20) is possible. We keep "web" (15 fps) — already under any 20 fps target.
+    recall_bot_variant: str = Field(default="web", alias="RECALL_BOT_VARIANT")
 
     # ── LiveKit (orchestration transport) ──
     livekit_url: str = Field(default="", alias="LIVEKIT_URL")

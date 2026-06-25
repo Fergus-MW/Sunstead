@@ -109,7 +109,15 @@ variable "bot_name" {
 variable "recall_region" {
   description = "Recall.ai region your API key belongs to (must match the key, e.g. eu-central-1)."
   type        = string
-  default     = "us-east-1"
+  default     = "eu-central-1"
+}
+
+# Recall bot variant = the only frame-rate lever (discrete): "web" ≈ 15 fps,
+# "web_4_core" ≈ 30 fps (4-core machine, higher cost). No arbitrary value.
+variable "recall_bot_variant" {
+  description = "Recall bot variant: \"web\" (~15fps) or \"web_4_core\" (~30fps)."
+  type        = string
+  default     = "web"
 }
 
 variable "anam_avatar_name" {
