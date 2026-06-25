@@ -7,7 +7,10 @@ the existing HTML, asks the model to apply the change, and rewrites the SAME pat
 changes across revisions. When `update_website` arrives without a `workspace_id`, it targets the
 most-recently-built site (so "make the header bigger" right after a build just works).
 
-Swap in a real Vercel deploy by replacing the write+url step (docs/AGENT_SYSTEM.md §5, §9).
+Publish target: when ``VERCEL_TOKEN`` is set, every publish deploys ALL sites to one Vercel
+project (see ``vercel_deploy.py``) and the per-site URL becomes the stable Vercel link; the Vercel
+ids land in ``meta.json`` so the edit path reuses them. With no token it falls back to the local
+served dir. See docs/AGENT_SYSTEM.md §5, §9.
 """
 
 from __future__ import annotations
@@ -18,8 +21,39 @@ import pathlib
 import re
 
 from shared.contracts import TaskCreatePayload
+from shared.effort import policy_for
 from shared.harness import TaskCtx, first_arg, now_iso
+from shared.ingest import Source, persist
 from shared.streaming import stream_completion
+from shared.websearch import grounded_stream, web_tools
+
+from .vercel_deploy import deploy_sites
+
+BUILD_TIMEOUT_S = 150  # whole-build ceiling incl. any web-search round-trips (a build streams long)
+# In-build grounding stays CHEAP regardless of the task's effort tier — a site verifies a few key
+# facts, it isn't a research deliverable, so a "deep" build mustn't balloon into 8 searches + a
+# minute of latency. Depth (thinking effort) still scales with the tier; only the search count is capped.
+BUILD_GROUND_SEARCHES = 2
+BUILD_GROUND_FETCHES = 1
+
+
+async def _persist_website_node(ctx: TaskCtx, site_id: str, brief: str, url: str, meta: dict) -> None:
+    """Write the published site into the KG as a `website` node (an entity, idempotent on its stable
+    id) so the avatar/agents can recall "the site we built" and its live link — via the universal
+    ingestor's `persist()`, the one write door. The `in_meeting` edge is passed without a meeting
+    node, so it no-ops when the meeting node is absent (insert_edge resolves both endpoints from
+    `nodes`). Best-effort: a missing/unconfigured MCP just skips it; the publish already succeeded."""
+    vercel = meta.get("vercel") or {}
+    props = {k: v for k, v in {
+        "title": brief, "url": url,
+        "revision": len(meta.get("revisions") or []),
+        "host": vercel.get("host"), "deployment_id": vercel.get("deployment_id"),
+        "updated": now_iso(),
+    }.items() if v is not None}
+    nodes = [{"type": "website", "name": site_id, "properties": props}]
+    edges = ([{"source": ("website", site_id), "target": ("meeting", ctx.meeting_id),
+               "type": "in_meeting", "properties": {}}] if ctx.meeting_id else [])
+    await persist(ctx, Source(kind="web-agent", scope=ctx.meeting_id or site_id), nodes, edges)
 
 # Concrete design contract — a vague "make it polished" prompt yields generic AI slop, so we pin
 # the typography, rhythm, palette, and breakpoints the model must hit (and the clichés it must avoid).
@@ -39,7 +73,12 @@ desktop. Fluid, readable line lengths.
 - Avoid generic AI aesthetics: not Inter/Roboto defaults, no purple-on-white gradient, no \
 cookie-cutter centered-hero-with-two-buttons. Make it feel intentional and on-brand.
 
-Return ONLY the HTML, starting with <!DOCTYPE html> — no markdown fences, no commentary."""
+Grounding — do NOT hallucinate facts: if the brief refers to anything real that could be wrong if \
+you guessed it (a product, company, person, event, price, statistic, date, quote), USE web_search \
+to verify it FIRST, then write the copy from what you found — never invent specifics. If the brief \
+is a pure design task with no factual claims, don't search. Either way the OUTPUT is the site, not \
+a report: after any searching, return ONLY the HTML, starting with <!DOCTYPE html> — no search \
+commentary, no markdown fences."""
 
 # update_website prefers surgical SEARCH/REPLACE edits over re-emitting the whole doc: cheaper,
 # faster to stream, and it can't accidentally drop unrelated content. RARE sentinels so they never
@@ -85,6 +124,15 @@ def _ensure_html(html: str) -> str:
     if "<!doctype" not in head and "<html" not in head:
         return f"<!DOCTYPE html><html><head><meta charset='utf-8'></head><body>{html}</body></html>"
     return html
+
+
+def _extract_html(text: str) -> str:
+    """Slice from the first <!doctype>/<html> if the model prefixed any preamble (more likely once
+    web_search is in the loop — a stray "Here's the site:" before the document). If neither marker
+    is present, return as-is and let _ensure_html wrap it."""
+    low = text.lower()
+    starts = [i for i in (low.find("<!doctype"), low.find("<html")) if i >= 0]
+    return text[min(starts):].strip() if starts else text
 
 
 def _latest_site(sites_dir: pathlib.Path) -> pathlib.Path | None:
@@ -133,6 +181,7 @@ async def run(task: TaskCreatePayload, ctx: TaskCtx) -> dict:
     out = sites_dir / site_id
     index = out / "index.html"
     is_update = task.intent == "update_website" and index.exists()
+    sources: list[dict] = []  # provenance of any facts the grounded build looked up (build path only)
 
     # Stream the build/edit: reasoning + HTML deltas flow to agent.trace as they generate, so the
     # dashboard can show the agent thinking and writing live (docs/AGENT_SYSTEM.md §3.5).
@@ -165,14 +214,35 @@ async def run(task: TaskCreatePayload, ctx: TaskCtx) -> dict:
             html = _ensure_html(_strip_fences(rewrite))
     else:
         await ctx.activity("drafting site", brief)
-        text = await stream_completion(
+        # Grounded build: the model may web_search to verify any real facts the brief implies before
+        # it writes, so the copy isn't hallucinated (a "build a site about X" gets X right). Budgeted
+        # by the planner's effort tier for THINKING depth, but the SEARCH budget is held to a fixed,
+        # cheap cap (BUILD_GROUND_*) so grounding a site never turns into a slow research run. We give
+        # the build a turn floor of 4 so a couple of search round-trips still leave room to emit the
+        # document. `sources` is the provenance of whatever it looked up.
+        pol = policy_for(task.effort)
+        user_msg = {"role": "user", "content": f"Build: {brief}\nStyle: {style}"}
+        text, sources, _timed = await grounded_stream(
             ctx,
             model=ctx.settings.model_smart,
-            max_tokens=16000,
             system=BUILD_SYSTEM,
-            messages=[{"role": "user", "content": f"Build: {brief}\nStyle: {style}"}],
+            messages=[dict(user_msg)],
+            tools=web_tools(BUILD_GROUND_SEARCHES, BUILD_GROUND_FETCHES),
+            thinking_effort=pol.thinking_effort,
+            max_tokens=16000,
+            max_turns=max(pol.max_turns, 4),
+            timeout=BUILD_TIMEOUT_S,
         )
-        html = _ensure_html(_strip_fences(text))
+        if not text.strip():  # grounding yielded nothing (timeout/tool error) — ungrounded fallback
+            await ctx.activity("grounding incomplete", "building without web grounding")
+            text = await stream_completion(
+                ctx,
+                model=ctx.settings.model_smart,
+                max_tokens=16000,
+                system=BUILD_SYSTEM,
+                messages=[dict(user_msg)],
+            )
+        html = _ensure_html(_extract_html(_strip_fences(text)))
 
     # Truncation guard: a build or full-rewrite that ran out of tokens loses its closing tag. We
     # still publish (a half-page beats nothing) but flag it so the caller/dashboard can warn. A
@@ -185,9 +255,8 @@ async def run(task: TaskCreatePayload, ctx: TaskCtx) -> dict:
     out.mkdir(parents=True, exist_ok=True)
     index.write_text(html, encoding="utf-8")
 
-    # Persist a small revision record alongside the site (durable workspace, §5).
-    # Tolerate a missing or corrupt meta.json (partial write, manual edit): a broken
-    # record must not fail an otherwise-successful publish.
+    # Load/repair the revision record (durable workspace, §5). Tolerate a missing or corrupt
+    # meta.json (partial write, manual edit): a broken record must not fail a good publish.
     meta_path = out / "meta.json"
     meta: dict = {"revisions": []}
     if meta_path.exists():
@@ -199,22 +268,58 @@ async def run(task: TaskCreatePayload, ctx: TaskCtx) -> dict:
             pass
     meta["revisions"].append({"intent": task.intent, "brief": brief, "task_id": task.task_id, "ts": now_iso()})
     meta["brief"] = brief
-    meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+    if sources:  # remember what this build grounded itself in (provenance for the workspace)
+        meta["grounded_sources"] = [s["url"] for s in sources][:8]
     revision = len(meta["revisions"])
 
+    # Publish. The local preview URL is ALWAYS available (the served dir / `make sites`), so we
+    # surface it regardless. When VERCEL_TOKEN is set we ALSO deploy all sites to the one Vercel
+    # project and offer that public link. Deploy fails open — a Vercel error never fails an
+    # otherwise-good build; we just fall back to the local link and record why. The Vercel ids/url
+    # land in meta.json so a later update_website (the edit path) inherits the same project + link.
     base = os.environ.get("SITES_BASE_URL", "http://localhost:8810").rstrip("/")
-    url = f"{base}/{site_id}/"
+    local_url = f"{base}/{site_id}/"
+    vercel_url = None
+    if ctx.settings.vercel_token:
+        try:
+            await ctx.activity("deploying to Vercel", ctx.settings.vercel_project)
+            dep = await deploy_sites(sites_dir, site_id, ctx.settings)
+            vercel_url = dep["url"]
+            meta["vercel"] = {
+                "project": ctx.settings.vercel_project,
+                "deployment_id": dep["deployment_id"],
+                "host": dep["host"],
+                "url": vercel_url,
+            }
+        except Exception as exc:  # noqa: BLE001 — fail open to local serve on any deploy error
+            await ctx.activity("Vercel deploy failed", f"falling back to local serve: {exc}")
+
+    # The headline link is the shareable Vercel URL when we have one, else the local preview. We
+    # emit BOTH as clickable url artifacts (deployed first) so the dashboard can offer each.
+    url = vercel_url or local_url
+    artifacts = [{"kind": "url", "value": url}]
+    if vercel_url and local_url != vercel_url:
+        artifacts.append({"kind": "url", "value": local_url})
+
+    meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
     await ctx.activity("published", url)
+    await _persist_website_node(ctx, site_id, brief, url, meta)
 
     verb = "Updated" if is_update else "Built and published"
     result = {
         "summary": f"{verb} a site for: {brief}",
-        "url": url,
-        "workspace_id": site_id,    # pass this back into update_website to revise the same site
+        "url": url,                          # shareable headline link (Vercel if deployed)
+        "preview_url": local_url,            # always-on local preview (`make sites`, :8810)
+        "workspace_id": site_id,             # pass this back into update_website to revise the same site
         "revision": revision,
         "bytes": len(html),
-        "artifacts": [{"kind": "url", "value": url}],
+        "artifacts": artifacts,
     }
+    if vercel_url:
+        result["deployed_url"] = vercel_url  # public Vercel link (only when actually deployed)
     if truncated:
         result["truncated"] = True
+    if sources:  # surface that the copy was grounded, and in what (the dashboard can show it)
+        result["grounded"] = True
+        result["sources"] = sources
     return result

@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="{{theme}}">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{title}}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,900&family=Sora:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --space: 8px;
+    --accent: {{{accent}}};
+    --canvas: #0b1a17;
+    --canvas-2: #0a1613;
+    --ink: #f3ead3;
+    --ink-dim: #a7b3ac;
+    --surface: color-mix(in srgb, var(--ink) 4%, var(--canvas));
+    --surface-2: color-mix(in srgb, var(--ink) 7%, var(--canvas));
+    --border: color-mix(in srgb, var(--ink) 12%, transparent);
+    --accent-soft: color-mix(in srgb, var(--accent) 16%, transparent);
+    --accent-ink: #07140f;
+    --maxw: 1120px;
+    --radius: 16px;
+  }
+
+  /* Light theme — flips canvas + ink; the color-mix palette re-derives from these two. */
+  :root[data-theme="light"] {
+    --canvas: #f6f3ea;
+    --canvas-2: #ece6d7;
+    --ink: #15201c;
+    --ink-dim: #5a685f;
+    --border: color-mix(in srgb, var(--ink) 14%, transparent);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; scroll-padding-top: calc(var(--space) * 11); }
+  ::selection { background: var(--accent-soft); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 8px; }
+  @media (prefers-reduced-motion: no-preference) {
+    @keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+    .hero > div:first-child { animation: rise .6s cubic-bezier(.2,.7,.2,1) both; }
+    .hero .mock { animation: rise .7s .12s cubic-bezier(.2,.7,.2,1) both; }
+  }
+  body {
+    font-family: "Sora", system-ui, sans-serif;
+    background: var(--canvas);
+    color: var(--ink);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+
+  /* Aurora glow — the only background flourish; positioned, not centered, to feel intentional. */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    background:
+      radial-gradient(60% 50% at 75% -5%, var(--accent-soft), transparent 70%),
+      radial-gradient(50% 45% at 5% 20%, color-mix(in srgb, var(--accent) 8%, transparent), transparent 70%),
+      var(--canvas);
+  }
+
+  a { color: inherit; text-decoration: none; }
+  img { max-width: 100%; display: block; }
+
+  .wrap { width: 100%; max-width: var(--maxw); margin-inline: auto; padding-inline: calc(var(--space) * 3); }
+
+  h1, h2, h3 { font-family: "Fraunces", Georgia, serif; font-weight: 600; line-height: 1.1; letter-spacing: -0.01em; }
+  .accent { color: var(--accent); }
+  .eyebrow {
+    display: inline-flex; align-items: center; gap: var(--space);
+    font-size: 0.8rem; font-weight: 500; letter-spacing: 0.04em; text-transform: uppercase;
+    color: var(--accent);
+    padding: calc(var(--space) * 0.75) calc(var(--space) * 1.5);
+    border: 1px solid var(--accent-soft); border-radius: 999px;
+    background: color-mix(in srgb, var(--accent) 6%, transparent);
+  }
+
+  /* ---------- Header ---------- */
+  header {
+    position: sticky; top: 0; z-index: 10;
+    backdrop-filter: blur(12px);
+    background: color-mix(in srgb, var(--canvas) 72%, transparent);
+    border-bottom: 1px solid var(--border);
+  }
+  .nav { display: flex; align-items: center; justify-content: space-between; height: calc(var(--space) * 9); gap: calc(var(--space) * 3); }
+  .brand { display: flex; align-items: center; gap: calc(var(--space) * 1.5); font-family: "Fraunces", serif; font-weight: 600; font-size: 1.15rem; }
+  .mark { width: 26px; height: 26px; border-radius: 8px; background: var(--accent); box-shadow: 0 0 24px var(--accent-soft); flex: none; }
+  .nav-links { display: flex; gap: calc(var(--space) * 3.5); font-size: 0.95rem; color: var(--ink-dim); }
+  .nav-links a:hover { color: var(--ink); }
+  .nav-cta { display: none; }
+
+  /* ---------- Buttons ---------- */
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: var(--space);
+    padding: calc(var(--space) * 1.5) calc(var(--space) * 3);
+    border-radius: 12px; font-weight: 600; font-size: 0.98rem; font-family: "Sora", sans-serif;
+    border: 1px solid transparent; cursor: pointer; transition: transform .15s ease, box-shadow .2s ease, background .2s ease;
+  }
+  .btn.primary { background: var(--accent); color: var(--accent-ink); box-shadow: 0 8px 30px var(--accent-soft); }
+  .btn.primary:hover { transform: translateY(-2px); box-shadow: 0 14px 40px var(--accent-soft); }
+  .btn.ghost { background: transparent; color: var(--ink); border-color: var(--border); }
+  .btn.ghost:hover { background: var(--surface-2); border-color: color-mix(in srgb, var(--ink) 24%, transparent); }
+
+  /* ---------- Hero ---------- */
+  .hero { display: grid; grid-template-columns: 1.05fr 0.95fr; gap: calc(var(--space) * 6); align-items: center; padding: calc(var(--space) * 12) 0 calc(var(--space) * 9); }
+  .hero h1 { font-size: clamp(2.4rem, 5.5vw, 3.9rem); margin: calc(var(--space) * 3) 0 calc(var(--space) * 2.5); }
+  .hero p.sub { font-size: clamp(1.05rem, 1.6vw, 1.2rem); color: var(--ink-dim); max-width: 30ch; }
+  .cta-row { display: flex; flex-wrap: wrap; gap: calc(var(--space) * 1.5); margin-top: calc(var(--space) * 4); }
+  .hero-note { margin-top: calc(var(--space) * 2); font-size: 0.85rem; color: var(--ink-dim); }
+
+  /* Decorative product card — pure CSS, evokes a live dashboard without faking real content. */
+  .mock { position: relative; border: 1px solid var(--border); border-radius: var(--radius); background: linear-gradient(160deg, var(--surface-2), var(--canvas-2)); padding: calc(var(--space) * 2.5); box-shadow: 0 40px 80px -40px rgba(0,0,0,0.6); }
+  .mock::after { content: ""; position: absolute; inset: 0; border-radius: var(--radius); box-shadow: inset 0 1px 0 color-mix(in srgb, var(--ink) 8%, transparent); pointer-events: none; }
+  .mock .mock-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: calc(var(--space) * 2); }
+  .mock .dots { display: flex; gap: 6px; }
+  .mock .dots i { width: 10px; height: 10px; border-radius: 50%; background: var(--border); }
+  .mock .dots i:first-child { background: var(--accent); }
+  .mock .tag { font-size: 0.7rem; font-weight: 600; letter-spacing: 0.04em; color: var(--accent); padding: 2px calc(var(--space)); border: 1px solid var(--accent-soft); border-radius: 999px; }
+  .mock .metric { display: flex; align-items: baseline; gap: var(--space); margin-bottom: calc(var(--space) * 1.5); }
+  .mock .metric b { font-family: "Fraunces", serif; font-weight: 600; font-size: 1.9rem; }
+  .mock .metric small { color: var(--accent); font-size: 0.8rem; }
+  .mock .bars { display: flex; align-items: flex-end; gap: var(--space); height: 120px; padding: calc(var(--space) * 1.5); background: var(--canvas); border-radius: 10px; border: 1px solid var(--border); }
+  .mock .bars span { flex: 1; border-radius: 5px 5px 0 0; background: color-mix(in srgb, var(--accent) 28%, var(--surface)); }
+  .mock .bars span:nth-child(2) { background: color-mix(in srgb, var(--accent) 55%, var(--surface)); }
+  .mock .bars span:nth-child(4) { background: var(--accent); }
+  .mock .line { height: 10px; border-radius: 6px; background: var(--surface-2); margin-top: calc(var(--space) * 1.5); }
+  .mock .line.short { width: 55%; }
+
+  /* ---------- Trust strip ---------- */
+  .trust { padding: calc(var(--space) * 4) 0; border-block: 1px solid var(--border); }
+  .trust .label { text-align: center; font-size: 0.8rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-dim); margin-bottom: calc(var(--space) * 2.5); }
+  .logos { display: flex; flex-wrap: wrap; justify-content: center; gap: calc(var(--space) * 5); }
+  .logos span { font-family: "Fraunces", serif; font-weight: 600; font-size: 1.25rem; color: var(--ink); opacity: 0.55; transition: opacity .2s ease; }
+  .logos span:hover { opacity: 1; }
+
+  /* ---------- Sections ---------- */
+  section.block { padding: calc(var(--space) * 12) 0; }
+  .section-head { max-width: 34ch; margin-bottom: calc(var(--space) * 6); }
+  .section-head h2 { font-size: clamp(1.8rem, 3.5vw, 2.6rem); }
+
+  .features { display: grid; grid-template-columns: repeat(3, 1fr); gap: calc(var(--space) * 3); }
+  .card { padding: calc(var(--space) * 4); border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); transition: transform .2s ease, border-color .2s ease, background .2s ease; }
+  .card:hover { transform: translateY(-4px); border-color: var(--accent-soft); background: var(--surface-2); }
+  .card .ico { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border-radius: 12px; background: color-mix(in srgb, var(--accent) 12%, transparent); font-size: 1.4rem; margin-bottom: calc(var(--space) * 2.5); }
+  .card h3 { font-size: 1.25rem; margin-bottom: var(--space); }
+  .card p { color: var(--ink-dim); font-size: 0.97rem; }
+
+  /* ---------- How it works (steps) ---------- */
+  .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: calc(var(--space) * 4); counter-reset: step; }
+  .step { position: relative; padding-top: calc(var(--space) * 2); counter-increment: step; }
+  .step .num { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 12px; font-family: "Fraunces", serif; font-weight: 600; font-size: 1.2rem; color: var(--accent); border: 1px solid var(--accent-soft); background: color-mix(in srgb, var(--accent) 8%, transparent); margin-bottom: calc(var(--space) * 2); }
+  .step .num::before { content: counter(step, decimal-leading-zero); }
+  .step h3 { font-size: 1.2rem; margin-bottom: calc(var(--space) * 0.75); }
+  .step p { color: var(--ink-dim); font-size: 0.97rem; }
+  .step:not(:last-child)::after { content: ""; position: absolute; top: calc(var(--space) * 4.5); left: 56px; right: calc(var(--space) * -2); height: 1px; background: linear-gradient(90deg, var(--accent-soft), transparent); }
+
+  /* ---------- Testimonial ---------- */
+  .quote { max-width: 760px; margin-inline: auto; text-align: center; }
+  .quote blockquote { font-family: "Fraunces", serif; font-weight: 500; font-size: clamp(1.4rem, 2.8vw, 2rem); line-height: 1.35; letter-spacing: -0.01em; }
+  .quote blockquote::before { content: "\201C"; color: var(--accent); }
+  .quote blockquote::after { content: "\201D"; color: var(--accent); }
+  .quote .by { margin-top: calc(var(--space) * 3); color: var(--ink-dim); font-size: 0.95rem; }
+  .quote .by strong { color: var(--ink); font-weight: 600; }
+
+  /* ---------- Stats band ---------- */
+  .stats { display: flex; flex-wrap: wrap; gap: calc(var(--space) * 3); justify-content: space-between; padding: calc(var(--space) * 6); border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+  .stat { flex: 1 1 160px; text-align: center; }
+  .stat .v { font-family: "Fraunces", serif; font-weight: 600; font-size: clamp(2.2rem, 4vw, 3rem); color: var(--accent); line-height: 1; }
+  .stat .l { color: var(--ink-dim); font-size: 0.95rem; margin-top: var(--space); }
+
+  /* ---------- Closing CTA ---------- */
+  .closing { position: relative; text-align: center; padding: calc(var(--space) * 9); border-radius: calc(var(--radius) * 1.5); overflow: hidden;
+    background: radial-gradient(120% 120% at 50% -20%, var(--accent-soft), transparent 60%), var(--surface-2);
+    border: 1px solid var(--accent-soft); }
+  .closing h2 { font-size: clamp(2rem, 4vw, 3rem); }
+  .closing p { color: var(--ink-dim); max-width: 46ch; margin: calc(var(--space) * 2) auto calc(var(--space) * 4); }
+
+  /* ---------- Footer ---------- */
+  footer { border-top: 1px solid var(--border); padding: calc(var(--space) * 5) 0; }
+  footer .row { display: flex; align-items: center; justify-content: space-between; gap: calc(var(--space) * 2); flex-wrap: wrap; color: var(--ink-dim); font-size: 0.9rem; }
+
+  /* ---------- Responsive ---------- */
+  @media (max-width: 1024px) {
+    .features { grid-template-columns: repeat(2, 1fr); }
+  }
+  @media (max-width: 760px) {
+    .nav-links { display: none; }
+    .hero { grid-template-columns: 1fr; gap: calc(var(--space) * 5); padding-top: calc(var(--space) * 7); }
+    .mock { order: -1; }
+    .hero p.sub { max-width: none; }
+    .features { grid-template-columns: 1fr; }
+    .steps { grid-template-columns: 1fr; gap: calc(var(--space) * 3); }
+    .step:not(:last-child)::after { display: none; }
+  }
+</style>
+</head>
+<body>
+  <header>
+    <div class="wrap nav">
+      <a class="brand" href="#"><span class="mark"></span>{{brand}}</a>
+      <nav class="nav-links">
+        {{#nav}}<a href="{{href}}">{{label}}</a>{{/nav}}
+      </nav>
+      <a class="btn primary" href="{{primary_cta.href}}">{{primary_cta.label}}</a>
+    </div>
+  </header>
+
+  <main>
+    <section class="wrap hero">
+      <div>
+        {{#eyebrow}}<span class="eyebrow">{{eyebrow}}</span>{{/eyebrow}}
+        <h1>{{headline}}{{#headline_accent}} <span class="accent">{{headline_accent}}</span>{{/headline_accent}}</h1>
+        <p class="sub">{{subhead}}</p>
+        <div class="cta-row">
+          <a class="btn primary" href="{{primary_cta.href}}">{{primary_cta.label}}</a>
+          {{#secondary_cta}}<a class="btn ghost" href="{{href}}">{{label}}</a>{{/secondary_cta}}
+        </div>
+        {{#hero_note}}<p class="hero-note">{{hero_note}}</p>{{/hero_note}}
+      </div>
+      <div class="mock" aria-hidden="true">
+        <div class="mock-top"><div class="dots"><i></i><i></i><i></i></div><span class="tag">● Live</span></div>
+        <div class="metric"><b>{{mock_metric}}</b><small>{{mock_metric_note}}</small></div>
+        <div class="bars"><span style="height:45%"></span><span style="height:70%"></span><span style="height:55%"></span><span style="height:92%"></span><span style="height:60%"></span><span style="height:78%"></span></div>
+        <div class="line"></div>
+        <div class="line short"></div>
+      </div>
+    </section>
+
+    {{#has_trust_logos}}
+    <section class="trust">
+      <div class="wrap">
+        {{#trust_label}}<p class="label">{{trust_label}}</p>{{/trust_label}}
+        <div class="logos">
+          {{#trust_logos}}<span>{{name}}</span>{{/trust_logos}}
+        </div>
+      </div>
+    </section>
+    {{/has_trust_logos}}
+
+    {{#has_features}}
+    <section class="wrap block" id="features">
+      <div class="section-head">
+        <h2>{{features_title}}</h2>
+      </div>
+      <div class="features">
+        {{#features}}
+        <article class="card">
+          <span class="ico">{{icon}}</span>
+          <h3>{{title}}</h3>
+          <p>{{body}}</p>
+        </article>
+        {{/features}}
+      </div>
+    </section>
+    {{/has_features}}
+
+    {{#has_steps}}
+    <section class="wrap block" id="how" style="padding-top:0">
+      <div class="section-head">
+        <h2>{{steps_title}}</h2>
+      </div>
+      <div class="steps">
+        {{#steps}}
+        <div class="step">
+          <span class="num"></span>
+          <h3>{{title}}</h3>
+          <p>{{body}}</p>
+        </div>
+        {{/steps}}
+      </div>
+    </section>
+    {{/has_steps}}
+
+    {{#has_stats}}
+    <section class="wrap block" id="stats" style="padding-top:0">
+      <div class="stats">
+        {{#stats}}
+        <div class="stat"><div class="v">{{value}}</div><div class="l">{{label}}</div></div>
+        {{/stats}}
+      </div>
+    </section>
+    {{/has_stats}}
+
+    {{#quote}}
+    <section class="wrap block">
+      <div class="quote">
+        <blockquote>{{quote}}</blockquote>
+        {{#quote_author}}<div class="by"><strong>{{quote_author}}</strong>{{#quote_role}} · {{quote_role}}{{/quote_role}}</div>{{/quote_author}}
+      </div>
+    </section>
+    {{/quote}}
+
+    <section class="wrap block">
+      <div class="closing">
+        <h2>{{closing_headline}}</h2>
+        {{#closing_subhead}}<p>{{closing_subhead}}</p>{{/closing_subhead}}
+        <a class="btn primary" href="{{closing_cta.href}}">{{closing_cta.label}}</a>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap row">
+      <a class="brand" href="#" style="font-size:1rem"><span class="mark" style="width:20px;height:20px"></span>{{brand}}</a>
+      <span>{{footer_note}}</span>
+    </div>
+  </footer>
+</body>
+</html>

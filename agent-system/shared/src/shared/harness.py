@@ -12,8 +12,10 @@ Emits (`agent.activity`, `agent.results`) are **direct Kafka produces** — no L
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections import deque
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Awaitable, Callable
 
 from . import config
@@ -26,7 +28,10 @@ from .sessions import SessionStore
 from .verify import verify_grounding
 
 
+log = logging.getLogger("shared.harness")
+
 SEEN_MAX = 4096  # idempotency-key dedupe window (FIFO) — bounds memory in a long-lived runner
+SEEN_LOG = "seen.log"  # durable dedupe journal under sessions_dir — survives a runner restart
 
 
 def now_iso() -> str:
@@ -57,9 +62,66 @@ class AgentContext:
         self.mcp = mcp                      # shared.mcp.AivenMCP | None
         self.anthropic = anthropic          # AsyncAnthropic | None
         self.store = SessionStore(settings.sessions_dir)
-        self._seen: set[str] = set()              # idempotency (in-memory; durable later)
+        self._seen: set[str] = set()              # idempotency-key dedupe window
         self._seen_order: deque[str] = deque()    # insertion order, to FIFO-evict `_seen` past SEEN_MAX
+        # Durable dedupe: a newline-delimited journal so a runner RESTART won't re-run delivered
+        # tasks (e.g. a duplicate site build / duplicate KG write) under at-least-once redelivery.
+        self._seen_path = Path(settings.sessions_dir) / SEEN_LOG
+        self._seen_appends = 0                    # appends since last compaction (→ rewrite at SEEN_MAX)
+        self._load_seen()
         self._bg: set[asyncio.Task] = set()  # detached post-emit work (async verifier), kept referenced
+
+    def claim(self, idem: str) -> bool:
+        """Idempotent claim under at-least-once delivery: returns False if `idem` was already
+        seen (caller skips), True if newly claimed. The claim is journaled to disk so a runner
+        restart resumes with the same dedupe window — a redelivered task stays a no-op."""
+        if idem in self._seen:
+            return False
+        self._seen.add(idem)
+        self._seen_order.append(idem)
+        self._persist_seen(idem)
+        if len(self._seen_order) > SEEN_MAX:      # FIFO-evict to bound memory (cf. planner)
+            self._seen.discard(self._seen_order.popleft())
+        return True
+
+    def _load_seen(self) -> None:
+        """Reload the dedupe window from the journal at boot (last SEEN_MAX keys). Best-effort:
+        a missing/unreadable journal just means we start cold — never blocks the runner."""
+        try:
+            if self._seen_path.exists():
+                for k in self._seen_path.read_text(encoding="utf-8").splitlines()[-SEEN_MAX:]:
+                    k = k.strip()
+                    if k and k not in self._seen:
+                        self._seen.add(k)
+                        self._seen_order.append(k)
+                if self._seen:
+                    log.info("durable dedupe: reloaded %d key(s) from %s", len(self._seen), self._seen_path)
+        except Exception:
+            log.debug("could not load dedupe journal %s", self._seen_path, exc_info=True)
+
+    def _persist_seen(self, idem: str) -> None:
+        """Append one claimed key (best-effort — a write hiccup never blocks task processing;
+        the in-memory window still dedupes within this process). Compact when the journal has
+        grown a full window of appends so it can't grow unbounded."""
+        try:
+            self._seen_path.parent.mkdir(parents=True, exist_ok=True)
+            with self._seen_path.open("a", encoding="utf-8") as f:
+                f.write(idem + "\n")
+            self._seen_appends += 1
+            if self._seen_appends >= SEEN_MAX:
+                self._compact_seen()
+        except Exception:
+            log.debug("could not persist dedupe key", exc_info=True)
+
+    def _compact_seen(self) -> None:
+        """Rewrite the journal to just the live window (atomic via tmp+replace)."""
+        try:
+            tmp = self._seen_path.with_suffix(".log.tmp")
+            tmp.write_text("\n".join(self._seen_order) + "\n", encoding="utf-8")
+            tmp.replace(self._seen_path)
+            self._seen_appends = 0
+        except Exception:
+            log.debug("could not compact dedupe journal", exc_info=True)
 
     async def _activity(self, meeting_id: str, task_id: str, status: str, detail: str | None) -> None:
         env = Envelope[ActivityPayload](
@@ -136,12 +198,8 @@ AgentFn = Callable[[TaskCreatePayload, TaskCtx], Awaitable[dict]]
 async def run_task(env: Envelope[TaskCreatePayload], agent: AgentFn, ctx: AgentContext) -> None:
     task = env.payload
     idem = task.idempotency_key or task.task_id
-    if idem in ctx._seen:                                   # claim / dedupe (at-least-once)
+    if not ctx.claim(idem):                                 # claim / dedupe (at-least-once, durable)
         return
-    ctx._seen.add(idem)
-    ctx._seen_order.append(idem)
-    if len(ctx._seen_order) > SEEN_MAX:                     # FIFO-evict to bound memory (cf. planner)
-        ctx._seen.discard(ctx._seen_order.popleft())
 
     tctx = TaskCtx(ctx, env.meeting_id, task.task_id)
     await tctx.activity("received", task.intent)

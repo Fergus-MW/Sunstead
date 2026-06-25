@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="{{theme}}">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{title}}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,900&family=Sora:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --space: 8px;
+    --accent: {{{accent}}};
+    --canvas: #0b1a17;
+    --ink: #f3ead3;
+    --ink-dim: #a7b3ac;
+    --surface: color-mix(in srgb, var(--ink) 4%, var(--canvas));
+    --surface-2: color-mix(in srgb, var(--ink) 7%, var(--canvas));
+    --border: color-mix(in srgb, var(--ink) 12%, transparent);
+    --accent-soft: color-mix(in srgb, var(--accent) 16%, transparent);
+    --accent-ink: #07140f;
+    --amber: #f0b429;
+    --code-bg: #06110d;
+    --code-ink: #e9efe7;
+    --maxw: 1200px;
+    --radius: 12px;
+    --sidebar: 240px;
+  }
+  :root[data-theme="light"] {
+    --canvas: #f6f3ea;
+    --ink: #15201c;
+    --ink-dim: #5a685f;
+    --border: color-mix(in srgb, var(--ink) 14%, transparent);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; scroll-padding-top: calc(var(--space) * 11); }
+  ::selection { background: var(--accent-soft); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 8px; }
+  @media (prefers-reduced-motion: no-preference) {
+    @keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+    main > h1, main > .intro { animation: rise .55s cubic-bezier(.2,.7,.2,1) both; }
+    main > .intro { animation-delay: .06s; }
+  }
+  body { font-family: "Sora", system-ui, sans-serif; background: var(--canvas); color: var(--ink); line-height: 1.7; -webkit-font-smoothing: antialiased; }
+  a { color: inherit; text-decoration: none; }
+  h1, h2, h3 { font-family: "Fraunces", Georgia, serif; font-weight: 600; line-height: 1.15; letter-spacing: -0.01em; }
+  code, pre { font-family: "JetBrains Mono", ui-monospace, monospace; }
+
+  header { position: sticky; top: 0; z-index: 20; backdrop-filter: blur(12px); background: color-mix(in srgb, var(--canvas) 80%, transparent); border-bottom: 1px solid var(--border); }
+  .nav { display: flex; align-items: center; justify-content: space-between; height: calc(var(--space) * 8); max-width: var(--maxw); margin-inline: auto; padding-inline: calc(var(--space) * 3); }
+  .brand { display: flex; align-items: center; gap: calc(var(--space) * 1.5); font-family: "Fraunces", serif; font-weight: 600; font-size: 1.1rem; }
+  .mark { width: 22px; height: 22px; border-radius: 7px; background: var(--accent); box-shadow: 0 0 18px var(--accent-soft); }
+  .status { display: inline-flex; align-items: center; gap: var(--space); font-size: 0.85rem; color: var(--ink-dim); padding: calc(var(--space)*0.5) calc(var(--space)*1.75); border: 1px solid var(--border); border-radius: 999px; background: var(--surface); }
+  .status .led { width: 9px; height: 9px; border-radius: 50%; background: var(--amber); box-shadow: 0 0 10px var(--amber); }
+  .status.ok .led { background: var(--accent); box-shadow: 0 0 10px var(--accent); }
+
+  .shell { display: grid; grid-template-columns: var(--sidebar) 1fr; gap: calc(var(--space) * 6); max-width: var(--maxw); margin-inline: auto; padding: calc(var(--space) * 5) calc(var(--space) * 3) calc(var(--space) * 9); }
+
+  /* Sidebar */
+  aside { position: sticky; top: calc(var(--space) * 11); align-self: start; height: max-content; }
+  aside .toc-label { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-dim); margin-bottom: calc(var(--space) * 2); padding-left: calc(var(--space) * 1.5); }
+  aside nav { display: flex; flex-direction: column; gap: 2px; }
+  aside a { display: block; padding: calc(var(--space) * 1) calc(var(--space) * 1.5); border-radius: 8px; color: var(--ink-dim); font-size: 0.95rem; border-left: 2px solid transparent; transition: color .15s, background .15s; }
+  aside a:hover { color: var(--ink); background: var(--surface); }
+  aside a.active { color: var(--accent); border-left-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, transparent); }
+
+  /* Content */
+  main { min-width: 0; }
+  main > h1 { font-size: clamp(2rem, 4vw, 2.8rem); }
+  main > .intro { color: var(--ink-dim); font-size: 1.08rem; margin: calc(var(--space) * 2) 0 calc(var(--space) * 5); max-width: 62ch; }
+  .doc-section { padding-top: calc(var(--space) * 5); margin-top: calc(var(--space) * 5); border-top: 1px solid var(--border); }
+  .doc-section:first-of-type { border-top: none; margin-top: 0; }
+  .doc-section h2 { font-size: 1.7rem; margin-bottom: calc(var(--space) * 2); }
+  .doc-section p { color: var(--ink-dim); max-width: 64ch; white-space: pre-line; }
+
+  /* Code block — a faux terminal window; always dark with light ink regardless of theme. */
+  .codeblock { margin-top: calc(var(--space) * 2.5); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; background: var(--code-bg); }
+  .cb-top { display: flex; align-items: center; justify-content: space-between; padding: calc(var(--space) * 1.25) calc(var(--space) * 2); border-bottom: 1px solid color-mix(in srgb, #fff 8%, transparent); }
+  .cb-dots { display: flex; gap: 6px; }
+  .cb-dots i { width: 9px; height: 9px; border-radius: 50%; background: rgba(255,255,255,0.16); }
+  .cb-dots i:first-child { background: var(--accent); }
+  .cb-lang { font-size: 0.7rem; letter-spacing: 0.06em; text-transform: uppercase; color: color-mix(in srgb, var(--code-ink) 55%, transparent); }
+  pre { margin: 0; padding: calc(var(--space) * 2.5); background: var(--code-bg); overflow-x: auto; font-size: 0.9rem; line-height: 1.65; color: var(--code-ink); }
+  pre::selection, pre ::selection { background: var(--accent-soft); }
+
+  /* Callout note inside a section */
+  .note { margin-top: calc(var(--space) * 2.5); padding: calc(var(--space) * 2) calc(var(--space) * 2.5); border-left: 3px solid var(--accent); background: color-mix(in srgb, var(--accent) 7%, transparent); border-radius: 0 var(--radius) var(--radius) 0; color: var(--ink); font-size: 0.95rem; max-width: 64ch; }
+  .note strong { color: var(--accent); }
+
+  /* Quick-links card grid under the intro */
+  .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: calc(var(--space) * 2); margin-bottom: calc(var(--space) * 4); }
+  .qcard { display: block; padding: calc(var(--space) * 2.5); border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); transition: transform .2s ease, border-color .2s ease; }
+  .qcard:hover { transform: translateY(-3px); border-color: var(--accent-soft); }
+  .qcard h3 { font-size: 1.05rem; }
+  .qcard p { color: var(--ink-dim); font-size: 0.9rem; margin-top: 4px; max-width: none; }
+  .qcard .go { color: var(--accent); font-size: 0.85rem; margin-top: calc(var(--space) * 1.25); display: inline-block; }
+
+  /* Changelog */
+  .changelog .rel { display: grid; grid-template-columns: 160px 1fr; gap: calc(var(--space) * 3); padding: calc(var(--space) * 3) 0; border-top: 1px solid var(--border); }
+  .changelog .ver { font-family: "Fraunces", serif; font-weight: 600; font-size: 1.2rem; }
+  .changelog .date { color: var(--ink-dim); font-size: 0.85rem; margin-top: 2px; }
+  .changelog ul { list-style: none; display: flex; flex-direction: column; gap: var(--space); }
+  .changelog li { color: var(--ink-dim); }
+  .tag { display: inline-block; font-size: 0.72rem; font-weight: 600; padding: 1px calc(var(--space)); border-radius: 6px; margin-right: var(--space); color: var(--accent-ink); background: var(--accent); vertical-align: middle; }
+  .tag.Fixed { background: #f0b429; }
+  .tag.Changed { background: #60a5fa; }
+
+  footer { border-top: 1px solid var(--border); }
+  footer .frow { max-width: var(--maxw); margin-inline: auto; padding: calc(var(--space) * 5) calc(var(--space) * 3); display: flex; justify-content: space-between; gap: var(--space); flex-wrap: wrap; color: var(--ink-dim); font-size: 0.9rem; }
+
+  @media (max-width: 860px) {
+    .shell { grid-template-columns: 1fr; gap: calc(var(--space) * 3); }
+    aside { position: static; border: 1px solid var(--border); border-radius: var(--radius); padding: calc(var(--space) * 2); background: var(--surface); }
+    aside nav { flex-direction: row; flex-wrap: wrap; }
+    .changelog .rel { grid-template-columns: 1fr; gap: var(--space); }
+    .cards { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+  <header>
+    <div class="nav">
+      <a class="brand" href="#"><span class="mark"></span>{{product}}</a>
+      {{#status_label}}<span class="status {{#status_ok}}ok{{/status_ok}}"><span class="led"></span>{{status_label}}</span>{{/status_label}}
+    </div>
+  </header>
+
+  <div class="shell">
+    {{#has_nav}}
+    <aside>
+      <div class="toc-label">On this page</div>
+      <nav>{{#nav}}<a href="{{href}}" class="{{#active}}active{{/active}}">{{label}}</a>{{/nav}}</nav>
+    </aside>
+    {{/has_nav}}
+
+    <main>
+      <h1>{{doc_title}}</h1>
+      {{#intro}}<p class="intro">{{intro}}</p>{{/intro}}
+
+      {{#has_quicklinks}}
+      <div class="cards">
+        {{#quicklinks}}<a class="qcard" href="{{href}}"><h3>{{label}}</h3>{{#body}}<p>{{body}}</p>{{/body}}<span class="go">Read →</span></a>{{/quicklinks}}
+      </div>
+      {{/has_quicklinks}}
+
+      {{#sections}}
+      <section class="doc-section" id="{{id}}">
+        <h2>{{heading}}</h2>
+        {{#body}}<p>{{body}}</p>{{/body}}
+        {{#code}}<div class="codeblock"><div class="cb-top"><span class="cb-dots"><i></i><i></i><i></i></span>{{#lang}}<span class="cb-lang">{{lang}}</span>{{/lang}}</div><pre>{{code}}</pre></div>{{/code}}
+        {{#note}}<div class="note">{{{note}}}</div>{{/note}}
+      </section>
+      {{/sections}}
+
+      {{#has_changelog}}
+      <section class="doc-section changelog" id="changelog">
+        <h2>{{changelog_title}}</h2>
+        {{#changelog}}
+        <div class="rel">
+          <div>
+            <div class="ver">{{version}}</div>
+            {{#date}}<div class="date">{{date}}</div>{{/date}}
+          </div>
+          <ul>{{#items}}<li>{{#tag}}<span class="tag {{tag}}">{{tag}}</span>{{/tag}}{{text}}</li>{{/items}}</ul>
+        </div>
+        {{/changelog}}
+      </section>
+      {{/has_changelog}}
+    </main>
+  </div>
+
+  <footer>
+    <div class="frow">
+      <a class="brand" href="#" style="font-size:1rem"><span class="mark" style="width:18px;height:18px"></span>{{product}}</a>
+      <span>{{footer_note}}</span>
+    </div>
+  </footer>
+</body>
+</html>

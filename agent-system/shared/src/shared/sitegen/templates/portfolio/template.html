@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="{{theme}}">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{title}}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,900&family=Sora:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --space: 8px;
+    --accent: {{{accent}}};
+    --canvas: #0b1a17;
+    --ink: #f3ead3;
+    --ink-dim: #a7b3ac;
+    --surface: color-mix(in srgb, var(--ink) 4%, var(--canvas));
+    --surface-2: color-mix(in srgb, var(--ink) 7%, var(--canvas));
+    --border: color-mix(in srgb, var(--ink) 12%, transparent);
+    --accent-soft: color-mix(in srgb, var(--accent) 16%, transparent);
+    --accent-ink: #07140f;
+    --maxw: 1000px;
+    --radius: 16px;
+  }
+  :root[data-theme="light"] {
+    --canvas: #f6f3ea;
+    --canvas-2: #ece6d7;
+    --ink: #15201c;
+    --ink-dim: #5a685f;
+    --border: color-mix(in srgb, var(--ink) 14%, transparent);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; scroll-padding-top: calc(var(--space) * 11); }
+  ::selection { background: var(--accent-soft); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 8px; }
+  @media (prefers-reduced-motion: no-preference) {
+    @keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+    .hero { animation: rise .6s cubic-bezier(.2,.7,.2,1) both; }
+  }
+  body { font-family: "Sora", system-ui, sans-serif; background: var(--canvas); color: var(--ink); line-height: 1.65; -webkit-font-smoothing: antialiased; overflow-x: hidden; }
+  body::before { content: ""; position: fixed; inset: 0; z-index: -1; background:
+      radial-gradient(50% 45% at 15% -5%, var(--accent-soft), transparent 70%), var(--canvas); }
+  a { color: inherit; text-decoration: none; }
+  .wrap { width: 100%; max-width: var(--maxw); margin-inline: auto; padding-inline: calc(var(--space) * 3); }
+  h1, h2, h3 { font-family: "Fraunces", Georgia, serif; font-weight: 600; line-height: 1.12; letter-spacing: -0.01em; }
+  .accent { color: var(--accent); }
+
+  header { position: sticky; top: 0; z-index: 10; backdrop-filter: blur(12px); background: color-mix(in srgb, var(--canvas) 72%, transparent); border-bottom: 1px solid var(--border); }
+  .nav { display: flex; align-items: center; justify-content: space-between; height: calc(var(--space) * 9); }
+  .brand { display: flex; align-items: center; gap: calc(var(--space) * 1.5); font-family: "Fraunces", serif; font-weight: 600; font-size: 1.1rem; }
+  .dot { width: 12px; height: 12px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 16px var(--accent-soft); }
+  .nav-links { display: flex; gap: calc(var(--space) * 3.5); font-size: 0.95rem; color: var(--ink-dim); }
+  .nav-links a:hover { color: var(--ink); }
+
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: var(--space); padding: calc(var(--space) * 1.5) calc(var(--space) * 3); border-radius: 12px; font-weight: 600; font-size: 0.96rem; border: 1px solid transparent; cursor: pointer; transition: transform .15s ease, background .2s ease, box-shadow .2s ease; }
+  .btn.primary { background: var(--accent); color: var(--accent-ink); box-shadow: 0 8px 30px var(--accent-soft); }
+  .btn.primary:hover { transform: translateY(-2px); }
+  .btn.ghost { background: transparent; color: var(--ink); border-color: var(--border); }
+  .btn.ghost:hover { background: var(--surface-2); }
+
+  /* Hero */
+  .hero { display: grid; grid-template-columns: auto 1fr; gap: calc(var(--space) * 4); align-items: center; padding: calc(var(--space) * 11) 0 calc(var(--space) * 7); }
+  .avatar { width: 132px; height: 132px; border-radius: 28px; display: flex; align-items: center; justify-content: center; font-family: "Fraunces", serif; font-weight: 600; font-size: 3rem; color: var(--accent-ink); background: var(--accent); box-shadow: 0 0 50px var(--accent-soft); }
+  .role { color: var(--accent); font-weight: 500; letter-spacing: 0.02em; }
+  .hero h1 { font-size: clamp(2.1rem, 4.6vw, 3.3rem); margin: calc(var(--space) * 1.5) 0; max-width: 18ch; }
+  .hero p { color: var(--ink-dim); max-width: 52ch; }
+  .hero-actions { display: flex; flex-wrap: wrap; align-items: center; gap: calc(var(--space) * 1.5); margin-top: calc(var(--space) * 3.5); }
+  .socials { display: flex; flex-wrap: wrap; gap: var(--space); }
+  .pill { font-size: 0.85rem; color: var(--ink-dim); padding: calc(var(--space)*0.75) calc(var(--space)*1.75); border: 1px solid var(--border); border-radius: 999px; transition: color .2s, border-color .2s; }
+  .pill:hover { color: var(--ink); border-color: var(--accent-soft); }
+
+  section.block { padding: calc(var(--space) * 8) 0; border-top: 1px solid var(--border); }
+  .eyebrow2 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--accent); margin-bottom: calc(var(--space) * 2); }
+  h2 { font-size: clamp(1.7rem, 3.2vw, 2.3rem); }
+
+  /* About */
+  .about { display: grid; grid-template-columns: 1.4fr 1fr; gap: calc(var(--space) * 5); align-items: start; }
+  .about p { color: var(--ink-dim); }
+  .chips { display: flex; flex-wrap: wrap; gap: var(--space); }
+  .chips span { font-size: 0.85rem; padding: calc(var(--space)*0.75) calc(var(--space)*1.75); border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+
+  /* Work grid */
+  .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: calc(var(--space) * 2.5); margin-top: calc(var(--space) * 4); }
+  .proj { display: block; padding: calc(var(--space) * 3.5); border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); transition: transform .2s ease, border-color .2s ease, background .2s ease; }
+  .proj:hover { transform: translateY(-4px); border-color: var(--accent-soft); background: var(--surface-2); }
+  .proj .top { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space); }
+  .proj h3 { font-size: 1.25rem; }
+  .proj .year { color: var(--ink-dim); font-size: 0.85rem; }
+  .proj p { color: var(--ink-dim); font-size: 0.95rem; margin: var(--space) 0 calc(var(--space) * 1.5); }
+  .tags { display: flex; flex-wrap: wrap; gap: calc(var(--space) * 0.75); }
+  .tags span { font-size: 0.75rem; color: var(--accent); padding: 2px calc(var(--space)); border: 1px solid var(--accent-soft); border-radius: 999px; }
+  .arrow { color: var(--accent); font-size: 0.9rem; }
+
+  /* Experience timeline */
+  .timeline { margin-top: calc(var(--space) * 4); border-left: 1px solid var(--border); padding-left: calc(var(--space) * 4); display: flex; flex-direction: column; gap: calc(var(--space) * 4); }
+  .xp { position: relative; }
+  .xp::before { content: ""; position: absolute; left: calc(var(--space) * -4 - 5px); top: 6px; width: 11px; height: 11px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 4px var(--canvas), 0 0 14px var(--accent-soft); }
+  .xp .head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space); flex-wrap: wrap; }
+  .xp h3 { font-size: 1.2rem; }
+  .xp .org { color: var(--accent); font-weight: 500; }
+  .xp .period { color: var(--ink-dim); font-size: 0.85rem; }
+  .xp p { color: var(--ink-dim); font-size: 0.95rem; margin-top: calc(var(--space) * 0.75); max-width: 60ch; }
+
+  /* Stats */
+  .stats { display: flex; flex-wrap: wrap; gap: calc(var(--space) * 3); margin-top: calc(var(--space) * 4); }
+  .stat { flex: 1 1 140px; padding: calc(var(--space)*3); border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); text-align: center; }
+  .stat .v { font-family: "Fraunces", serif; font-weight: 600; font-size: 2.2rem; color: var(--accent); line-height: 1; }
+  .stat .l { color: var(--ink-dim); font-size: 0.9rem; margin-top: var(--space); }
+
+  /* Contact */
+  .contact { text-align: center; padding: calc(var(--space) * 9) 0; }
+  .contact h2 { font-size: clamp(2rem, 4vw, 3rem); }
+  .contact p { color: var(--ink-dim); max-width: 46ch; margin: calc(var(--space) * 2) auto calc(var(--space) * 4); }
+
+  footer { border-top: 1px solid var(--border); padding: calc(var(--space) * 5) 0; }
+  footer .frow { display: flex; align-items: center; justify-content: space-between; gap: var(--space); flex-wrap: wrap; color: var(--ink-dim); font-size: 0.9rem; }
+
+  @media (max-width: 760px) {
+    .nav-links { display: none; }
+    .hero { grid-template-columns: 1fr; gap: calc(var(--space)*3); }
+    .avatar { width: 96px; height: 96px; font-size: 2.2rem; }
+    .about { grid-template-columns: 1fr; }
+    .grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+  <header>
+    <div class="wrap nav">
+      <a class="brand" href="#"><span class="dot"></span>{{name}}</a>
+      <nav class="nav-links">{{#nav}}<a href="{{href}}">{{label}}</a>{{/nav}}</nav>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="hero">
+      <div class="avatar">{{initials}}</div>
+      <div>
+        {{#role}}<div class="role">{{role}}</div>{{/role}}
+        <h1>{{headline}}</h1>
+        <p>{{intro}}</p>
+        <div class="hero-actions">
+          <a class="btn primary" href="{{primary_cta.href}}">{{primary_cta.label}}</a>
+          {{#secondary_cta}}<a class="btn ghost" href="{{href}}">{{label}}</a>{{/secondary_cta}}
+          <span class="socials">{{#socials}}<a class="pill" href="{{href}}">{{label}}</a>{{/socials}}</span>
+        </div>
+      </div>
+    </section>
+
+    {{#about_body}}
+    <section class="block" id="about">
+      <div class="about">
+        <div>
+          <div class="eyebrow2">{{about_title}}</div>
+          <p>{{about_body}}</p>
+        </div>
+        {{#has_skills}}<div class="chips">{{#skills}}<span>{{name}}</span>{{/skills}}</div>{{/has_skills}}
+      </div>
+    </section>
+    {{/about_body}}
+
+    {{#has_projects}}
+    <section class="block" id="work">
+      <h2>{{work_title}}</h2>
+      <div class="grid">
+        {{#projects}}
+        <a class="proj" href="{{href}}">
+          <div class="top"><h3>{{title}}</h3>{{#year}}<span class="year">{{year}}</span>{{/year}}</div>
+          <p>{{body}}</p>
+          <div class="tags">{{#tags}}<span>{{name}}</span>{{/tags}}</div>
+        </a>
+        {{/projects}}
+      </div>
+    </section>
+    {{/has_projects}}
+
+    {{#has_experience}}
+    <section class="block" id="experience">
+      <h2>{{experience_title}}</h2>
+      <div class="timeline">
+        {{#experience}}
+        <div class="xp">
+          <div class="head">
+            <h3>{{role}}{{#org}} · <span class="org">{{org}}</span>{{/org}}</h3>
+            {{#period}}<span class="period">{{period}}</span>{{/period}}
+          </div>
+          {{#body}}<p>{{body}}</p>{{/body}}
+        </div>
+        {{/experience}}
+      </div>
+    </section>
+    {{/has_experience}}
+
+    {{#has_stats}}
+    <section class="block">
+      <div class="stats">{{#stats}}<div class="stat"><div class="v">{{value}}</div><div class="l">{{label}}</div></div>{{/stats}}</div>
+    </section>
+    {{/has_stats}}
+
+    <section class="block contact" id="contact">
+      <h2>{{contact_headline}}</h2>
+      {{#contact_subhead}}<p>{{contact_subhead}}</p>{{/contact_subhead}}
+      <a class="btn primary" href="{{contact_cta.href}}">{{contact_cta.label}}</a>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap frow">
+      <a class="brand" href="#" style="font-size:1rem"><span class="dot"></span>{{name}}</a>
+      <span>{{footer_note}}</span>
+    </div>
+  </footer>
+</body>
+</html>

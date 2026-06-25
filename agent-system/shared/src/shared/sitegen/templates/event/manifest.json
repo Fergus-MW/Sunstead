@@ -1,0 +1,96 @@
+{
+  "id": "event",
+  "name": "Event / Launch",
+  "description": "A one-page event, conference, launch, or webinar page: hero with the event name, date and location, a register CTA, a facts band (date / venue / format / price), a time-ordered agenda/schedule, a speakers grid, and a closing RSVP call-to-action. Use for 'make a page for our launch event / conference / meetup / webinar'.",
+  "fields": {
+    "title": {"type": "string", "description": "Browser tab / SEO title", "default": "Aurora Summit 2026"},
+    "event_name": {"type": "string", "description": "Event name shown in the header and hero", "default": "Aurora Summit"},
+    "theme": {"type": "string", "description": "Color scheme: 'dark' (default) or 'light'.", "default": "dark"},
+    "accent": {"type": "color", "description": "Hex accent color driving CTAs, highlights, and the glow. Match the event's brand.", "default": "#4ade80"},
+    "nav": {
+      "type": "list",
+      "description": "Header anchor links (2-4). Omit for a bare header.",
+      "item": {"label": {"type": "string"}, "href": {"type": "string", "default": "#"}},
+      "default": [
+        {"label": "Schedule", "href": "#schedule"},
+        {"label": "Speakers", "href": "#speakers"},
+        {"label": "Venue", "href": "#facts"}
+      ]
+    },
+    "kicker": {"type": "string", "description": "Small label above the hero title (e.g. 'Annual Conference · 3rd edition'). Optional.", "default": "The annual gathering for builders"},
+    "headline": {"type": "string", "description": "Hero headline / event tagline — the reason to attend.", "required": true, "default": "Two days on the edge of what's possible."},
+    "date_label": {"type": "string", "description": "Human-readable date or date range (e.g. 'October 14–16, 2026').", "default": "October 14–16, 2026"},
+    "location_label": {"type": "string", "description": "Venue / city, or 'Online' for a virtual event.", "default": "Lisbon, Portugal"},
+    "subhead": {"type": "text", "description": "One or two sentences on who it's for and what they'll get.", "default": "A focused, high-signal event for the people building what's next — talks, workshops, and the hallway conversations that actually move things forward."},
+    "primary_cta": {"type": "object", "description": "Main register/RSVP button.", "item": {"label": {"type": "string"}, "href": {"type": "string"}}, "default": {"label": "Register now", "href": "#register"}},
+    "secondary_cta": {"type": "object", "description": "Optional secondary button (e.g. view schedule). Omit to show only the primary.", "item": {"label": {"type": "string"}, "href": {"type": "string"}}, "default": {"label": "See the schedule", "href": "#schedule"}},
+    "facts": {
+      "type": "list",
+      "description": "Key facts band (2-4): date, venue, format, price, etc. Each is a label + a value.",
+      "item": {"label": {"type": "string"}, "value": {"type": "string"}},
+      "default": [
+        {"label": "When", "value": "Oct 14–16, 2026"},
+        {"label": "Where", "value": "Lisbon + livestream"},
+        {"label": "Format", "value": "Talks & workshops"},
+        {"label": "Tickets", "value": "From €149"}
+      ]
+    },
+    "highlights_title": {"type": "string", "description": "Heading for the 'what to expect' highlights section.", "default": "What to expect"},
+    "highlights_subhead": {"type": "string", "description": "Optional subtext under the highlights heading.", "default": "Two days built around learning, building, and meeting the people behind the work."},
+    "highlights": {
+      "type": "list",
+      "description": "Highlight cards (3 read best). Each has a short icon (emoji works), a title, and a one-line body. Set to null to hide the section.",
+      "item": {"icon": {"type": "string", "default": "✦"}, "title": {"type": "string"}, "body": {"type": "string"}},
+      "default": [
+        {"icon": "🎤", "title": "Talks that matter", "body": "Keynotes and deep-dives from people shipping at the frontier — no filler."},
+        {"icon": "🛠️", "title": "Hands-on workshops", "body": "Small-group sessions where you build something real and leave with it."},
+        {"icon": "🤝", "title": "Real connections", "body": "Curated hallway time and a closing social — the part you'll remember."}
+      ]
+    },
+    "agenda_title": {"type": "string", "description": "Heading for the schedule section.", "default": "The schedule"},
+    "agenda": {
+      "type": "list",
+      "description": "Time-ordered agenda rows. Each has a time, a session title, an optional one-line description, and an optional speaker name.",
+      "item": {
+        "time": {"type": "string", "default": ""},
+        "title": {"type": "string"},
+        "desc": {"type": "string", "default": ""},
+        "speaker": {"type": "string", "default": ""}
+      },
+      "default": [
+        {"time": "09:00", "title": "Doors & coffee", "desc": "Registration opens; grab a badge and a flat white.", "speaker": ""},
+        {"time": "10:00", "title": "Opening keynote", "desc": "Where the field is heading and why it matters now.", "speaker": "Dr. Mara Quinn"},
+        {"time": "11:30", "title": "Hands-on workshop", "desc": "Build a working prototype start to finish.", "speaker": "Sam Okafor"},
+        {"time": "14:00", "title": "Lightning talks", "desc": "Six speakers, six ideas, six minutes each.", "speaker": ""},
+        {"time": "16:30", "title": "Closing panel & social", "desc": "Open Q&A, then drinks on the terrace.", "speaker": ""}
+      ]
+    },
+    "speakers_title": {"type": "string", "description": "Heading for the speakers section. Omit the whole section by setting speakers to null.", "default": "Who you'll hear from"},
+    "speakers": {
+      "type": "list",
+      "description": "Speaker cards. Each has a name, a role/affiliation, and 1-2 initials used for the avatar circle (no photos).",
+      "item": {
+        "initials": {"type": "string", "default": "•"},
+        "name": {"type": "string"},
+        "role": {"type": "string", "default": ""}
+      },
+      "default": [
+        {"initials": "MQ", "name": "Dr. Mara Quinn", "role": "Research Lead, Northwind"},
+        {"initials": "SO", "name": "Sam Okafor", "role": "Principal Engineer, Lumen"},
+        {"initials": "JR", "name": "Jules Reyes", "role": "Founder, Hearth"},
+        {"initials": "AL", "name": "Ari Lindqvist", "role": "Design Director, Verge"}
+      ]
+    },
+    "sponsors_label": {"type": "string", "description": "Caption above the sponsors strip. Optional.", "default": "With support from"},
+    "sponsors": {
+      "type": "list",
+      "description": "Sponsor names rendered as text logos (no images). Set to null to hide the strip.",
+      "item": {"name": {"type": "string"}},
+      "default": [{"name": "Northwind"}, {"name": "Lumen"}, {"name": "Hearth"}, {"name": "Verge"}]
+    },
+    "closing_headline": {"type": "string", "description": "Heading for the final register section.", "default": "Save your seat"},
+    "closing_subhead": {"type": "string", "description": "Subtext under the closing headline. Optional.", "default": "Limited capacity. Early-bird pricing ends soon."},
+    "closing_cta": {"type": "object", "description": "Final register button.", "item": {"label": {"type": "string"}, "href": {"type": "string"}}, "default": {"label": "Register now", "href": "#"}},
+    "footer_note": {"type": "string", "description": "Small footer line.", "default": "Hope to see you there."}
+  }
+}

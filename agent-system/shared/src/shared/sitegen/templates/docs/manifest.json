@@ -1,0 +1,79 @@
+{
+  "id": "docs",
+  "name": "Docs / Changelog / Status",
+  "description": "A clean documentation / release-notes / status page: a sticky sidebar table of contents, an intro, content sections (each with a heading, body text, and an optional code block), and a versioned changelog. A status badge in the header signals health. Use for 'write a docs page / API reference / changelog / release notes / status page for X'.",
+  "fields": {
+    "title": {"type": "string", "description": "Browser tab / SEO title.", "default": "Aurora Docs"},
+    "product": {"type": "string", "description": "Product / project name in the header.", "default": "Aurora"},
+    "theme": {"type": "string", "description": "Color scheme: 'dark' (default) or 'light'. Code blocks stay dark in both.", "default": "dark"},
+    "accent": {"type": "color", "description": "Hex accent color for links, the active nav item, and the status dot.", "default": "#4ade80"},
+    "status_label": {"type": "string", "description": "Short status text in the header badge (e.g. 'All systems operational', 'v2.1.0'). Optional.", "default": "All systems operational"},
+    "status_ok": {"type": "string", "description": "Set to any truthy value for a green/healthy badge; set to null/empty for a neutral (amber) badge.", "default": "yes"},
+    "nav": {
+      "type": "list",
+      "description": "Sidebar table-of-contents links. Hrefs should match the section ids you use (e.g. '#install'). Mark one item active with active:true.",
+      "item": {"label": {"type": "string"}, "href": {"type": "string", "default": "#"}, "active": {"type": "string", "default": ""}},
+      "default": [
+        {"label": "Overview", "href": "#overview", "active": "yes"},
+        {"label": "Install", "href": "#install", "active": ""},
+        {"label": "Quickstart", "href": "#quickstart", "active": ""},
+        {"label": "Configuration", "href": "#config", "active": ""},
+        {"label": "Changelog", "href": "#changelog", "active": ""}
+      ]
+    },
+    "doc_title": {"type": "string", "description": "The main page heading.", "default": "Documentation"},
+    "intro": {"type": "text", "description": "Intro paragraph under the main heading.", "default": "Everything you need to install, configure, and ship with Aurora. Start with the overview, then jump to the section you need from the sidebar."},
+    "quicklinks": {
+      "type": "list",
+      "description": "Optional card grid right under the intro — a docs-home jump list (3 read best). Each has a label, a one-line body, and a link (usually a section anchor). Set to null to hide.",
+      "item": {"label": {"type": "string"}, "body": {"type": "string", "default": ""}, "href": {"type": "string", "default": "#"}},
+      "default": [
+        {"label": "Install", "body": "Get up and running in under a minute.", "href": "#install"},
+        {"label": "Quickstart", "body": "Your first query in three lines.", "href": "#quickstart"},
+        {"label": "Configuration", "body": "Override any default when you need to.", "href": "#config"}
+      ]
+    },
+    "sections": {
+      "type": "list",
+      "description": "Documentation sections in order. Each has an id (sidebar anchor target), a heading, body text (plain paragraphs; double newlines for paragraph breaks), an OPTIONAL code block with an OPTIONAL lang label shown in the code window, and an OPTIONAL note callout (supports inline HTML like '<strong>Tip:</strong>').",
+      "item": {
+        "id": {"type": "string", "default": ""},
+        "heading": {"type": "string"},
+        "body": {"type": "text", "default": ""},
+        "code": {"type": "string", "default": ""},
+        "lang": {"type": "string", "default": ""},
+        "note": {"type": "string", "default": ""}
+      },
+      "default": [
+        {"id": "overview", "heading": "Overview", "body": "Aurora is a small, fast toolkit for building data products. It has no required configuration and works out of the box, but every default can be overridden when you need to.", "code": "", "lang": "", "note": "<strong>New here?</strong> Start with Install, then follow the Quickstart end to end."},
+        {"id": "install", "heading": "Install", "body": "Install from your package manager of choice. Aurora ships as a single dependency with no native build step.", "code": "npm install aurora\n# or\npnpm add aurora", "lang": "bash", "note": ""},
+        {"id": "quickstart", "heading": "Quickstart", "body": "Import the client, point it at your data source, and run your first query in three lines.", "code": "import { Aurora } from 'aurora'\n\nconst db = new Aurora({ url: process.env.DATABASE_URL })\nconst rows = await db.query('select * from events limit 10')", "lang": "typescript", "note": ""},
+        {"id": "config", "heading": "Configuration", "body": "Configuration is optional. Pass an options object to the constructor, or set environment variables — explicit options always win over the environment.", "code": "new Aurora({\n  url: process.env.DATABASE_URL,\n  poolSize: 10,\n  timeout: 30_000,\n})", "lang": "typescript", "note": "<strong>Tip:</strong> Keep secrets in the environment, not in source."}
+      ]
+    },
+    "changelog_title": {"type": "string", "description": "Heading for the changelog section.", "default": "Changelog"},
+    "changelog": {
+      "type": "list",
+      "description": "Release entries, newest first. Each has a version, a date, and a list of change lines (each {text: ...}, optionally tagged 'Added'/'Fixed'/'Changed' via tag).",
+      "item": {
+        "version": {"type": "string"},
+        "date": {"type": "string", "default": ""},
+        "items": {"type": "list", "item": {"tag": {"type": "string", "default": ""}, "text": {"type": "string"}}, "default": []}
+      },
+      "default": [
+        {"version": "2.1.0", "date": "Jun 2026", "items": [
+          {"tag": "Added", "text": "Streaming query results with backpressure."},
+          {"tag": "Fixed", "text": "Connection pool leak under high concurrency."}
+        ]},
+        {"version": "2.0.0", "date": "Apr 2026", "items": [
+          {"tag": "Changed", "text": "New client API — see the migration guide."},
+          {"tag": "Added", "text": "First-class TypeScript types throughout."}
+        ]},
+        {"version": "1.4.2", "date": "Feb 2026", "items": [
+          {"tag": "Fixed", "text": "Incorrect timezone handling in date filters."}
+        ]}
+      ]
+    },
+    "footer_note": {"type": "string", "description": "Small footer line.", "default": "Docs built with Aurora."}
+  }
+}

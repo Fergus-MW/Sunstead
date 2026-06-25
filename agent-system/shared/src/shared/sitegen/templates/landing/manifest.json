@@ -1,0 +1,83 @@
+{
+  "id": "landing",
+  "name": "Landing / Product",
+  "description": "A one-page product/SaaS landing page: sticky header, asymmetric hero with a floating product card, a trust strip, a feature grid, a stats band, and a closing call-to-action. Use for 'build a landing page for X', product launches, or marketing one-pagers.",
+  "fields": {
+    "title": {"type": "string", "description": "Browser tab / SEO title", "default": "Sunstead"},
+    "brand": {"type": "string", "description": "Brand or product name in the header and footer", "default": "Sunstead"},
+    "theme": {"type": "string", "description": "Color scheme: 'dark' (default) or 'light'. Both re-derive cleanly from the accent.", "default": "dark"},
+    "accent": {"type": "color", "description": "Hex accent color driving CTAs, highlights, and the glow. Pick one that fits the brand.", "default": "#4ade80"},
+    "nav": {
+      "type": "list",
+      "description": "Header nav links (2-4 looks best). Omit for a bare header.",
+      "item": {"label": {"type": "string"}, "href": {"type": "string", "default": "#"}},
+      "default": [
+        {"label": "Features", "href": "#features"},
+        {"label": "How it works", "href": "#stats"},
+        {"label": "Pricing", "href": "#"}
+      ]
+    },
+    "eyebrow": {"type": "string", "description": "Small label above the headline (e.g. 'New · v2.0'). Optional.", "default": "Now in public beta"},
+    "headline": {"type": "string", "description": "The hero headline — the main promise. Keep it short and concrete.", "required": true, "default": "Ship your idea before the meeting ends."},
+    "headline_accent": {"type": "string", "description": "Optional trailing phrase rendered in the accent color, continuing the headline. Leave empty to skip.", "default": ""},
+    "subhead": {"type": "text", "description": "One or two sentences expanding on the headline.", "default": "A single sentence that explains what you do, who it's for, and why it's faster than the way they do it today."},
+    "primary_cta": {"type": "object", "description": "Main button.", "item": {"label": {"type": "string"}, "href": {"type": "string"}}, "default": {"label": "Get started", "href": "#"}},
+    "secondary_cta": {"type": "object", "description": "Optional secondary/ghost button. Omit to show only the primary.", "item": {"label": {"type": "string"}, "href": {"type": "string"}}, "default": {"label": "Watch the demo", "href": "#"}},
+    "hero_note": {"type": "string", "description": "Small reassurance line under the buttons (e.g. 'No credit card required'). Optional.", "default": "No credit card required · 2-minute setup"},
+    "mock_metric": {"type": "string", "description": "Big number shown in the decorative hero product card (e.g. '2,847', '$1.2M', '99.9%').", "default": "2,847"},
+    "mock_metric_note": {"type": "string", "description": "Small accent caption beside the hero card metric (e.g. 'events / min ▲ 12%').", "default": "events / min ▲ 12%"},
+    "trust_label": {"type": "string", "description": "Caption above the logo/trust strip. Optional.", "default": "Trusted by teams shipping every day"},
+    "trust_logos": {
+      "type": "list",
+      "description": "Names rendered as text 'logos' in the trust strip (we don't have real logo images). Optional.",
+      "item": {"name": {"type": "string"}},
+      "default": [{"name": "Northwind"}, {"name": "Acme Co"}, {"name": "Lumen"}, {"name": "Hearth"}, {"name": "Verge"}]
+    },
+    "features_title": {"type": "string", "description": "Heading for the features section.", "default": "Everything you need, nothing you don't"},
+    "features": {
+      "type": "list",
+      "description": "Feature cards (3 or 6 read best as a grid). Each has a short icon (an emoji works well), a title, and a one-line body.",
+      "item": {
+        "icon": {"type": "string", "default": "✦"},
+        "title": {"type": "string"},
+        "body": {"type": "string"}
+      },
+      "default": [
+        {"icon": "⚡", "title": "Fast by default", "body": "Built to feel instant — no spinners, no waiting on a build."},
+        {"icon": "🔒", "title": "Secure", "body": "Your data stays yours, encrypted in transit and at rest."},
+        {"icon": "🧩", "title": "Composable", "body": "Drop it into the stack you already have in a single afternoon."},
+        {"icon": "📈", "title": "Insightful", "body": "Live dashboards turn raw activity into decisions you can act on."},
+        {"icon": "🤝", "title": "Collaborative", "body": "Bring the whole team into one shared, always-current workspace."},
+        {"icon": "🌐", "title": "Anywhere", "body": "Works on every device, online or off, with no install required."}
+      ]
+    },
+    "steps_title": {"type": "string", "description": "Heading for the 'how it works' section.", "default": "How it works"},
+    "steps": {
+      "type": "list",
+      "description": "A numbered 'how it works' flow (3 read best; the numbers are added automatically). Each step has a title and a one-line body. Set to null to hide the section.",
+      "item": {"title": {"type": "string"}, "body": {"type": "string"}},
+      "default": [
+        {"title": "Connect", "body": "Link your data or tools in a couple of clicks — no migration required."},
+        {"title": "Configure", "body": "Pick sensible defaults or tune every knob; changes apply instantly."},
+        {"title": "Ship", "body": "Go live with a single command and watch results in real time."}
+      ]
+    },
+    "quote": {"type": "text", "description": "An optional pull-quote / testimonial shown as a large centered quote. Set to null to hide.", "default": "We replaced three tools and a week of setup with one afternoon. It just works."},
+    "quote_author": {"type": "string", "description": "Name of the person quoted. Optional.", "default": "Riya Malhotra"},
+    "quote_role": {"type": "string", "description": "Their role / company, shown after the name. Optional.", "default": "Head of Platform, Northwind"},
+    "stats": {
+      "type": "list",
+      "description": "A band of headline numbers (2-4). Optional. Each has a big value and a label.",
+      "item": {"value": {"type": "string"}, "label": {"type": "string"}},
+      "default": [
+        {"value": "10×", "label": "faster than the old way"},
+        {"value": "99.9%", "label": "uptime, measured monthly"},
+        {"value": "2 min", "label": "from sign-up to first result"}
+      ]
+    },
+    "closing_headline": {"type": "string", "description": "Heading for the final CTA section.", "default": "Ready when you are."},
+    "closing_subhead": {"type": "string", "description": "Subtext under the closing headline. Optional.", "default": "Start free today. Upgrade only when you outgrow it."},
+    "closing_cta": {"type": "object", "description": "The final call-to-action button.", "item": {"label": {"type": "string"}, "href": {"type": "string"}}, "default": {"label": "Get started free", "href": "#"}},
+    "footer_note": {"type": "string", "description": "Small footer line (copyright, tagline).", "default": "Built with Sunstead."}
+  }
+}

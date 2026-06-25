@@ -1,0 +1,96 @@
+{
+  "id": "portfolio",
+  "name": "Portfolio / Personal",
+  "description": "A personal or professional portfolio one-pager: hero with name, role, intro and social links, an about section with skill chips, a project/work grid, an optional stats band, and a contact call-to-action. Use for 'build me a personal site / portfolio / résumé page for <person>'.",
+  "fields": {
+    "title": {"type": "string", "description": "Browser tab / SEO title (often the person's name).", "default": "Jordan Ellis"},
+    "name": {"type": "string", "description": "The person's name, shown in the header and hero.", "required": true, "default": "Jordan Ellis"},
+    "initials": {"type": "string", "description": "1-2 initials for the avatar circle (no photo).", "default": "JE"},
+    "theme": {"type": "string", "description": "Color scheme: 'dark' (default) or 'light'.", "default": "dark"},
+    "accent": {"type": "color", "description": "Hex accent color. Pick one that suits the person's vibe.", "default": "#4ade80"},
+    "nav": {
+      "type": "list",
+      "description": "Header anchor links. Omit for a bare header.",
+      "item": {"label": {"type": "string"}, "href": {"type": "string", "default": "#"}},
+      "default": [
+        {"label": "Work", "href": "#work"},
+        {"label": "About", "href": "#about"},
+        {"label": "Contact", "href": "#contact"}
+      ]
+    },
+    "role": {"type": "string", "description": "Role / title shown as the hero eyebrow (e.g. 'Product Designer & Front-end Engineer').", "default": "Product Designer & Front-end Engineer"},
+    "headline": {"type": "string", "description": "Hero headline — a short personal statement.", "required": true, "default": "I design and build calm, useful software."},
+    "intro": {"type": "text", "description": "A short first-person intro paragraph.", "default": "I'm a designer-developer who likes shipping things that feel obvious in hindsight. Currently focused on tools that make complex work feel simple."},
+    "primary_cta": {"type": "object", "description": "Main button (e.g. get in touch).", "item": {"label": {"type": "string"}, "href": {"type": "string"}}, "default": {"label": "Get in touch", "href": "#contact"}},
+    "secondary_cta": {"type": "object", "description": "Optional secondary button (e.g. résumé). Omit to show only the primary.", "item": {"label": {"type": "string"}, "href": {"type": "string"}}, "default": {"label": "Download résumé", "href": "#"}},
+    "socials": {
+      "type": "list",
+      "description": "Social / profile links rendered as small pills (GitHub, LinkedIn, X, email, etc.).",
+      "item": {"label": {"type": "string"}, "href": {"type": "string", "default": "#"}},
+      "default": [
+        {"label": "GitHub", "href": "#"},
+        {"label": "LinkedIn", "href": "#"},
+        {"label": "Email", "href": "#contact"}
+      ]
+    },
+    "about_title": {"type": "string", "description": "Heading for the about section.", "default": "About"},
+    "about_body": {"type": "text", "description": "A longer about paragraph. Optional — set to null to hide the about section.", "default": "Over the last decade I've worked across early-stage startups and larger product teams, usually at the seam where design meets engineering. I care about typography, fast feedback loops, and interfaces that respect the person using them."},
+    "skills": {
+      "type": "list",
+      "description": "Skill / tool chips shown beside the about text.",
+      "item": {"name": {"type": "string"}},
+      "default": [
+        {"name": "Product Design"}, {"name": "TypeScript"}, {"name": "React"},
+        {"name": "Design Systems"}, {"name": "Figma"}, {"name": "Node"}, {"name": "Accessibility"}
+      ]
+    },
+    "work_title": {"type": "string", "description": "Heading for the projects/work grid.", "default": "Selected work"},
+    "projects": {
+      "type": "list",
+      "description": "Project cards. Each has a title, an optional year, a one-line description, optional comma-free tag list, and an optional link.",
+      "item": {
+        "title": {"type": "string"},
+        "year": {"type": "string", "default": ""},
+        "body": {"type": "string"},
+        "href": {"type": "string", "default": ""},
+        "tags": {"type": "list", "item": {"name": {"type": "string"}}, "default": []}
+      },
+      "default": [
+        {"title": "Helio Dashboard", "year": "2026", "body": "A real-time analytics dashboard redesigned around a single glanceable view.", "href": "#", "tags": [{"name": "Product"}, {"name": "React"}]},
+        {"title": "Field Notes", "year": "2025", "body": "An offline-first note app for researchers, built around fast capture.", "href": "#", "tags": [{"name": "Design"}, {"name": "Mobile"}]},
+        {"title": "Pace", "year": "2024", "body": "A team planning tool that turns roadmaps into honest timelines.", "href": "#", "tags": [{"name": "0→1"}, {"name": "TypeScript"}]},
+        {"title": "Open-source: rune", "year": "2023", "body": "A tiny, dependency-free state library with 4k+ stars.", "href": "#", "tags": [{"name": "OSS"}]}
+      ]
+    },
+    "experience_title": {"type": "string", "description": "Heading for the experience/work-history timeline.", "default": "Experience"},
+    "experience": {
+      "type": "list",
+      "description": "Work history as a vertical timeline, newest first. Each entry has a role, an optional org/company, an optional period (e.g. '2023 — now'), and an optional one-line body. Set to null to hide the section.",
+      "item": {
+        "role": {"type": "string"},
+        "org": {"type": "string", "default": ""},
+        "period": {"type": "string", "default": ""},
+        "body": {"type": "string", "default": ""}
+      },
+      "default": [
+        {"role": "Senior Product Designer", "org": "Lumen", "period": "2023 — now", "body": "Lead designer for the core product; shipped a ground-up redesign that lifted activation 28%."},
+        {"role": "Product Designer", "org": "Hearth", "period": "2020 — 2023", "body": "Owned design end-to-end across web and mobile at an early-stage startup."},
+        {"role": "Front-end Engineer", "org": "Northwind", "period": "2017 — 2020", "body": "Built and maintained the design system used across a dozen product teams."}
+      ]
+    },
+    "stats": {
+      "type": "list",
+      "description": "Optional headline numbers band (e.g. years of experience, projects shipped). Set to null to hide.",
+      "item": {"value": {"type": "string"}, "label": {"type": "string"}},
+      "default": [
+        {"value": "10+", "label": "years shipping product"},
+        {"value": "40", "label": "projects delivered"},
+        {"value": "4k★", "label": "on open source"}
+      ]
+    },
+    "contact_headline": {"type": "string", "description": "Heading for the contact section.", "default": "Let's build something."},
+    "contact_subhead": {"type": "string", "description": "Subtext under the contact headline. Optional.", "default": "I'm open to select freelance and full-time work. The fastest way to reach me is email."},
+    "contact_cta": {"type": "object", "description": "The contact button (often a mailto: link).", "item": {"label": {"type": "string"}, "href": {"type": "string"}}, "default": {"label": "Say hello", "href": "mailto:hello@example.com"}},
+    "footer_note": {"type": "string", "description": "Small footer line.", "default": "Designed & built from scratch."}
+  }
+}

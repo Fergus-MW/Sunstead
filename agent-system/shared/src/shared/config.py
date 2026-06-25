@@ -118,6 +118,11 @@ class Settings:
     model_mid: str = field(default_factory=lambda: _env("MODEL_MID", "claude-sonnet-4-6"))
     model_fast: str = field(default_factory=lambda: _env("MODEL_FAST", "claude-haiku-4-5"))
     sessions_dir: str = field(default_factory=lambda: _env("SESSIONS_DIR", "./.sessions"))
+    # web-agent publish target: with a token set, deploy all sites to ONE Vercel project
+    # (many files, one project) instead of the local server. Team-scoped token → no team id.
+    vercel_token: str = field(default_factory=lambda: _env("VERCEL_TOKEN"))
+    vercel_project: str = field(default_factory=lambda: _env("VERCEL_PROJECT", "sunstead-sites"))
+    vercel_team_id: str = field(default_factory=lambda: _env("VERCEL_TEAM_ID"))
     max_concurrency: int = field(default_factory=lambda: _int("MAX_CONCURRENCY", 8))
     consumer_group: str = field(default_factory=lambda: _env("CONSUMER_GROUP", "agent-runner"))
     kafka: KafkaSettings = field(default_factory=KafkaSettings)

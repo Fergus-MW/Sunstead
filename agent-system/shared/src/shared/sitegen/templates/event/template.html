@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="{{theme}}">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{title}}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,900&family=Sora:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --space: 8px;
+    --accent: {{{accent}}};
+    --canvas: #0b1a17;
+    --canvas-2: #0a1613;
+    --ink: #f3ead3;
+    --ink-dim: #a7b3ac;
+    --surface: color-mix(in srgb, var(--ink) 4%, var(--canvas));
+    --surface-2: color-mix(in srgb, var(--ink) 7%, var(--canvas));
+    --border: color-mix(in srgb, var(--ink) 12%, transparent);
+    --accent-soft: color-mix(in srgb, var(--accent) 16%, transparent);
+    --accent-ink: #07140f;
+    --maxw: 1120px;
+    --radius: 16px;
+  }
+  :root[data-theme="light"] {
+    --canvas: #f6f3ea;
+    --canvas-2: #ece6d7;
+    --ink: #15201c;
+    --ink-dim: #5a685f;
+    --border: color-mix(in srgb, var(--ink) 14%, transparent);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; scroll-padding-top: calc(var(--space) * 11); }
+  ::selection { background: var(--accent-soft); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 8px; }
+  @media (prefers-reduced-motion: no-preference) {
+    @keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+    .hero { animation: rise .6s cubic-bezier(.2,.7,.2,1) both; }
+  }
+  body { font-family: "Sora", system-ui, sans-serif; background: var(--canvas); color: var(--ink); line-height: 1.6; -webkit-font-smoothing: antialiased; overflow-x: hidden; }
+  body::before { content: ""; position: fixed; inset: 0; z-index: -1; background:
+      radial-gradient(55% 50% at 50% -8%, var(--accent-soft), transparent 70%),
+      radial-gradient(45% 40% at 90% 10%, color-mix(in srgb, var(--accent) 8%, transparent), transparent 70%),
+      var(--canvas); }
+  a { color: inherit; text-decoration: none; }
+  .wrap { width: 100%; max-width: var(--maxw); margin-inline: auto; padding-inline: calc(var(--space) * 3); }
+  h1, h2, h3 { font-family: "Fraunces", Georgia, serif; font-weight: 600; line-height: 1.1; letter-spacing: -0.01em; }
+  .accent { color: var(--accent); }
+
+  header { position: sticky; top: 0; z-index: 10; backdrop-filter: blur(12px); background: color-mix(in srgb, var(--canvas) 72%, transparent); border-bottom: 1px solid var(--border); }
+  .nav { display: flex; align-items: center; justify-content: space-between; height: calc(var(--space) * 9); gap: calc(var(--space) * 3); }
+  .brand { display: flex; align-items: center; gap: calc(var(--space) * 1.5); font-family: "Fraunces", serif; font-weight: 600; font-size: 1.15rem; }
+  .mark { width: 26px; height: 26px; border-radius: 8px; background: var(--accent); box-shadow: 0 0 24px var(--accent-soft); flex: none; }
+  .nav-links { display: flex; gap: calc(var(--space) * 3.5); font-size: 0.95rem; color: var(--ink-dim); }
+  .nav-links a:hover { color: var(--ink); }
+
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: var(--space); padding: calc(var(--space) * 1.5) calc(var(--space) * 3); border-radius: 12px; font-weight: 600; font-size: 0.98rem; font-family: "Sora", sans-serif; border: 1px solid transparent; cursor: pointer; transition: transform .15s ease, box-shadow .2s ease, background .2s ease; }
+  .btn.primary { background: var(--accent); color: var(--accent-ink); box-shadow: 0 8px 30px var(--accent-soft); }
+  .btn.primary:hover { transform: translateY(-2px); box-shadow: 0 14px 40px var(--accent-soft); }
+  .btn.ghost { background: transparent; color: var(--ink); border-color: var(--border); }
+  .btn.ghost:hover { background: var(--surface-2); }
+
+  /* Hero — centered, date/place chips, big title */
+  .hero { text-align: center; padding: calc(var(--space) * 13) 0 calc(var(--space) * 9); }
+  .chips { display: inline-flex; flex-wrap: wrap; justify-content: center; gap: var(--space); margin-bottom: calc(var(--space) * 3); }
+  .chip { display: inline-flex; align-items: center; gap: var(--space); font-size: 0.85rem; color: var(--ink); padding: calc(var(--space) * 0.75) calc(var(--space) * 2); border: 1px solid var(--border); border-radius: 999px; background: var(--surface); }
+  .chip.kicker { color: var(--accent); border-color: var(--accent-soft); background: color-mix(in srgb, var(--accent) 6%, transparent); }
+  .hero h1 { font-size: clamp(2.6rem, 6.5vw, 4.6rem); margin: calc(var(--space) * 2) auto calc(var(--space) * 3); max-width: 18ch; }
+  .hero p.sub { font-size: clamp(1.05rem, 1.7vw, 1.22rem); color: var(--ink-dim); max-width: 56ch; margin: 0 auto; }
+  .cta-row { display: flex; flex-wrap: wrap; gap: calc(var(--space) * 1.5); justify-content: center; margin-top: calc(var(--space) * 4); }
+
+  /* Facts band */
+  .facts { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+  .fact { background: var(--surface); padding: calc(var(--space) * 3.5); text-align: center; }
+  .fact .l { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-dim); }
+  .fact .v { font-family: "Fraunces", serif; font-weight: 600; font-size: 1.3rem; margin-top: calc(var(--space) * 0.75); }
+
+  section.block { padding: calc(var(--space) * 11) 0; }
+  .section-head { text-align: center; margin-bottom: calc(var(--space) * 6); }
+  .section-head h2 { font-size: clamp(1.9rem, 3.6vw, 2.7rem); }
+  .section-head p { color: var(--ink-dim); max-width: 52ch; margin: calc(var(--space) * 1.5) auto 0; }
+
+  /* Highlights — what to expect */
+  .highlights { display: grid; grid-template-columns: repeat(3, 1fr); gap: calc(var(--space) * 3); }
+  .hl { padding: calc(var(--space) * 4); border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); transition: transform .2s ease, border-color .2s ease; }
+  .hl:hover { transform: translateY(-4px); border-color: var(--accent-soft); }
+  .hl .ico { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border-radius: 12px; background: color-mix(in srgb, var(--accent) 12%, transparent); font-size: 1.4rem; margin-bottom: calc(var(--space) * 2); }
+  .hl h3 { font-size: 1.2rem; margin-bottom: var(--space); }
+  .hl p { color: var(--ink-dim); font-size: 0.96rem; }
+
+  /* Sponsors */
+  .sponsors { text-align: center; }
+  .sponsors .label { font-size: 0.8rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-dim); margin-bottom: calc(var(--space) * 3); }
+  .sp-logos { display: flex; flex-wrap: wrap; justify-content: center; gap: calc(var(--space) * 5); }
+  .sp-logos span { font-family: "Fraunces", serif; font-weight: 600; font-size: 1.3rem; opacity: 0.55; transition: opacity .2s ease; }
+  .sp-logos span:hover { opacity: 1; }
+
+  /* Agenda */
+  .agenda { max-width: 760px; margin-inline: auto; display: flex; flex-direction: column; }
+  .row { display: grid; grid-template-columns: 96px 1fr; gap: calc(var(--space) * 3); padding: calc(var(--space) * 3) 0; border-top: 1px solid var(--border); }
+  .row:last-child { border-bottom: 1px solid var(--border); }
+  .row .time { font-family: "Fraunces", serif; font-weight: 600; color: var(--accent); font-size: 1.05rem; }
+  .row h3 { font-size: 1.2rem; margin-bottom: calc(var(--space) * 0.5); }
+  .row p { color: var(--ink-dim); font-size: 0.96rem; }
+  .row .by { display: inline-block; margin-top: var(--space); font-size: 0.85rem; color: var(--ink); opacity: 0.85; }
+  .row .by::before { content: "— "; color: var(--accent); }
+
+  /* Speakers */
+  .speakers { display: grid; grid-template-columns: repeat(4, 1fr); gap: calc(var(--space) * 3); }
+  .sp { text-align: center; padding: calc(var(--space) * 3); border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); transition: transform .2s ease, border-color .2s ease; }
+  .sp:hover { transform: translateY(-4px); border-color: var(--accent-soft); }
+  .avatar { width: 72px; height: 72px; border-radius: 50%; margin: 0 auto calc(var(--space) * 2); display: flex; align-items: center; justify-content: center; font-family: "Fraunces", serif; font-weight: 600; font-size: 1.5rem; color: var(--accent-ink); background: var(--accent); box-shadow: 0 0 30px var(--accent-soft); }
+  .sp h3 { font-size: 1.1rem; }
+  .sp p { color: var(--ink-dim); font-size: 0.9rem; margin-top: calc(var(--space) * 0.5); }
+
+  /* Closing */
+  .closing { text-align: center; padding: calc(var(--space) * 9); border-radius: calc(var(--radius) * 1.5); background: radial-gradient(120% 120% at 50% -20%, var(--accent-soft), transparent 60%), var(--surface-2); border: 1px solid var(--accent-soft); }
+  .closing h2 { font-size: clamp(2rem, 4vw, 3rem); }
+  .closing p { color: var(--ink-dim); max-width: 46ch; margin: calc(var(--space) * 2) auto calc(var(--space) * 4); }
+
+  footer { border-top: 1px solid var(--border); padding: calc(var(--space) * 5) 0; }
+  footer .frow { display: flex; align-items: center; justify-content: space-between; gap: calc(var(--space) * 2); flex-wrap: wrap; color: var(--ink-dim); font-size: 0.9rem; }
+
+  @media (max-width: 1024px) { .speakers { grid-template-columns: repeat(2, 1fr); } .facts { grid-template-columns: repeat(2, 1fr); } .highlights { grid-template-columns: 1fr; } }
+  @media (max-width: 600px) { .nav-links { display: none; } .speakers { grid-template-columns: repeat(2, 1fr); } .row { grid-template-columns: 64px 1fr; gap: calc(var(--space) * 2); } }
+</style>
+</head>
+<body>
+  <header>
+    <div class="wrap nav">
+      <a class="brand" href="#"><span class="mark"></span>{{event_name}}</a>
+      <nav class="nav-links">{{#nav}}<a href="{{href}}">{{label}}</a>{{/nav}}</nav>
+      <a class="btn primary" href="{{primary_cta.href}}">{{primary_cta.label}}</a>
+    </div>
+  </header>
+
+  <main>
+    <section class="wrap hero">
+      <div class="chips">
+        {{#kicker}}<span class="chip kicker">{{kicker}}</span>{{/kicker}}
+        {{#date_label}}<span class="chip">📅 {{date_label}}</span>{{/date_label}}
+        {{#location_label}}<span class="chip">📍 {{location_label}}</span>{{/location_label}}
+      </div>
+      <h1>{{headline}}</h1>
+      <p class="sub">{{subhead}}</p>
+      <div class="cta-row">
+        <a class="btn primary" href="{{primary_cta.href}}">{{primary_cta.label}}</a>
+        {{#secondary_cta}}<a class="btn ghost" href="{{href}}">{{label}}</a>{{/secondary_cta}}
+      </div>
+    </section>
+
+    {{#has_facts}}
+    <section class="wrap" id="facts">
+      <div class="facts">
+        {{#facts}}<div class="fact"><div class="l">{{label}}</div><div class="v">{{value}}</div></div>{{/facts}}
+      </div>
+    </section>
+    {{/has_facts}}
+
+    {{#has_highlights}}
+    <section class="wrap block" id="about">
+      <div class="section-head">
+        <h2>{{highlights_title}}</h2>
+        {{#highlights_subhead}}<p>{{highlights_subhead}}</p>{{/highlights_subhead}}
+      </div>
+      <div class="highlights">
+        {{#highlights}}
+        <div class="hl">
+          <span class="ico">{{icon}}</span>
+          <h3>{{title}}</h3>
+          <p>{{body}}</p>
+        </div>
+        {{/highlights}}
+      </div>
+    </section>
+    {{/has_highlights}}
+
+    {{#has_agenda}}
+    <section class="wrap block" id="schedule">
+      <div class="section-head"><h2>{{agenda_title}}</h2></div>
+      <div class="agenda">
+        {{#agenda}}
+        <div class="row">
+          <div class="time">{{time}}</div>
+          <div>
+            <h3>{{title}}</h3>
+            {{#desc}}<p>{{desc}}</p>{{/desc}}
+            {{#speaker}}<span class="by">{{speaker}}</span>{{/speaker}}
+          </div>
+        </div>
+        {{/agenda}}
+      </div>
+    </section>
+    {{/has_agenda}}
+
+    {{#has_speakers}}
+    <section class="wrap block" id="speakers" style="padding-top:0">
+      <div class="section-head"><h2>{{speakers_title}}</h2></div>
+      <div class="speakers">
+        {{#speakers}}
+        <div class="sp">
+          <div class="avatar">{{initials}}</div>
+          <h3>{{name}}</h3>
+          {{#role}}<p>{{role}}</p>{{/role}}
+        </div>
+        {{/speakers}}
+      </div>
+    </section>
+    {{/has_speakers}}
+
+    {{#has_sponsors}}
+    <section class="wrap block sponsors" style="padding-top:0">
+      {{#sponsors_label}}<p class="label">{{sponsors_label}}</p>{{/sponsors_label}}
+      <div class="sp-logos">{{#sponsors}}<span>{{name}}</span>{{/sponsors}}</div>
+    </section>
+    {{/has_sponsors}}
+
+    <section class="wrap block" id="register">
+      <div class="closing">
+        <h2>{{closing_headline}}</h2>
+        {{#closing_subhead}}<p>{{closing_subhead}}</p>{{/closing_subhead}}
+        <a class="btn primary" href="{{closing_cta.href}}">{{closing_cta.label}}</a>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap frow">
+      <a class="brand" href="#" style="font-size:1rem"><span class="mark" style="width:20px;height:20px"></span>{{event_name}}</a>
+      <span>{{footer_note}}</span>
+    </div>
+  </footer>
+</body>
+</html>

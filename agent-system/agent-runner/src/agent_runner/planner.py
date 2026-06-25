@@ -55,7 +55,10 @@ task when someone is clearly asking for work to be done that maps to an agent be
 
 Agents and the intents they handle:
 - web-agent — `build_website` (make a new one-page site), `update_website` (change an existing one).
-    args: {{"brief": "<what the site is for>", "style": "<optional look & feel>"}}
+    The web-agent researches the live web ITSELF to ground factual copy, so if the site is about
+    something real, put the real subject in the brief — don't split off a separate research task just
+    to inform the site. args: {{"brief": "<what the site is for; name the real subject to cover>",
+    "style": "<optional look & feel>"}}
 - git-agent — `who_changed`, `blame`, `read_git`, `recent_changes` (questions about the codebase / its history,
     answered from a knowledge graph). args: {{"question": "<the natural-language question>"}}
 - data-agent — `analyze`, `summarize_metrics`, `query_data` (questions about metrics / data — answered
@@ -70,6 +73,18 @@ Agents and the intents they handle:
 
 One utterance may imply more than one task (e.g. "build a landing page and tell me who owns auth" → two tasks).
 Rewrite each request into a clean, self-contained `question`/`brief` — the agent does not see the conversation.
+
+CRITICAL — never split research away from a site build. Tasks DON'T share results: a research task's answer \
+goes to the speaker, it never reaches the web-agent. The web-agent researches the live web ITSELF. So when the \
+work is "a site about X" / "look it up so the site is accurate", emit exactly ONE `build_website` task and fold \
+the lookup INTO its brief — adding a separate research task would be wasted (its answer can't inform the site) AND \
+the site would still need to ground itself. Two hard rules:
+- A `build_website` brief MUST name the real subject and every factual requirement the speaker implied (e.g. \
+"a site about the EU AI Act — research it and ground the copy in accurate, current facts"). NEVER emit a build \
+with a generic brief ("a landing page") when the speaker named a concrete subject — a bare brief is what makes \
+the site come out ungrounded.
+- Emit a SEPARATE research/git task only when the speaker wants that answer delivered to THEM, not merely baked \
+into the site. "Build a site about X and look X up" is ONE build task, not two.
 
 Worked examples — what to propose for a range of utterances. Backchannel and ordinary chatter map to NO tasks;
 a clear ask maps to one task; a compound ask maps to two. Study the boundary between conversation and a real request:
@@ -90,6 +105,10 @@ a clear ask maps to one task; a compound ask maps to two. Study the boundary bet
      web-agent `build_website`, args {{"brief": "A quick dashboard site for the metrics"}}; and
      git-agent `who_changed`, args {{"question": "Who owns the metrics pipeline?"}}.
 10. "let's ship it 🚀" → no tasks. (Enthusiasm, not a delegable request.)
+11. "build us a site about the new EU AI Act and look it up so the details are right" → ONE task:
+     web-agent `build_website`, args {{"brief": "A site explaining the EU AI Act — research it and ground \
+     the copy in accurate, current facts"}}. (The web-agent does its own web research; the lookup only \
+     serves the site, so do NOT add a separate research task.)
 
 When in doubt about whether an utterance is conversation or a request, prefer NO tasks — a spurious task is worse \
 than a missed backchannel, and a genuinely-needed request will usually be restated more explicitly.
