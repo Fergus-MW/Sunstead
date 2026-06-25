@@ -52,7 +52,7 @@ class Settings(BaseSettings):
     anam_avatar_name: str = Field(default="Sunstead", alias="ANAM_AVATAR_NAME")
 
     # ── Cognition ──
-    pipeline_mode: PipelineMode = Field(default="cascade", alias="PIPELINE_MODE")
+    pipeline_mode: PipelineMode = Field(default="realtime", alias="PIPELINE_MODE")
     anthropic_api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")
     llm_model: str = Field(default="claude-sonnet-4-6", alias="LLM_MODEL")
     # STT leg: Soniox (streaming, our default — PLAN §STT) or Deepgram. Each plugin

@@ -28,8 +28,8 @@ Terraform stack that runs the whole avatar agent on AWS:
 
 - Terraform ≥ 1.5, AWS CLI, Docker — all authenticated to the target account/region.
 - A domain you control (for `livekit_domain` + `livekit_turn_domain`).
-- Provider API keys: Recall, Anam, and your cognition pipeline (Anthropic +
-  Deepgram + Cartesia for `cascade`, or OpenAI for `realtime`).
+- Provider API keys: Recall, Anam, and your cognition pipeline — **OpenAI** for
+  the default `realtime` mode, or Anthropic + Deepgram + Cartesia for `cascade`.
 
 ## 1. Configure
 
@@ -41,8 +41,8 @@ livekit_domain      = "livekit.sunstead.example.com"
 livekit_turn_domain = "turn.sunstead.example.com"
 acme_email          = "fergus@60x.ai"
 backend_url         = "https://central-kg-api.example.com"
-# pipeline_mode     = "cascade"   # or "realtime"
-# stt_provider      = "deepgram"  # cascade STT engine (this stack provisions Deepgram)
+# pipeline_mode     = "realtime"  # default (OpenAI); "cascade" for Deepgram+Anthropic+Cartesia
+# stt_provider      = "deepgram"  # cascade only — ignored in realtime
 # gateway_url       = "https://gateway.example.com"  # delegation edge; blank = delegation off
 # anam_avatar_id    = "..."
 # ssh_ingress_cidr  = "203.0.113.7/32"   # your IP, to SSH the LiveKit box
@@ -93,12 +93,16 @@ real values (they're `ignore_changes`d, so Terraform won't revert them):
 
 ```bash
 P=sunstead-avatar   # = var.name_prefix
+# Always needed:
 aws ssm put-parameter --overwrite --type SecureString --name "/$P/providers/recall_api_key"    --value "$RECALL_API_KEY"
 aws ssm put-parameter --overwrite --type SecureString --name "/$P/providers/anam_api_key"      --value "$ANAM_API_KEY"
+# realtime (default) — just OpenAI:
+aws ssm put-parameter --overwrite --type SecureString --name "/$P/providers/openai_api_key"    --value "$OPENAI_API_KEY"
+# cascade only (skip for realtime — leave them as REPLACE_ME):
 aws ssm put-parameter --overwrite --type SecureString --name "/$P/providers/anthropic_api_key" --value "$ANTHROPIC_API_KEY"
 aws ssm put-parameter --overwrite --type SecureString --name "/$P/providers/deepgram_api_key"  --value "$DEEPGRAM_API_KEY"
 aws ssm put-parameter --overwrite --type SecureString --name "/$P/providers/cartesia_api_key"  --value "$CARTESIA_API_KEY"
-# openai_api_key only if PIPELINE_MODE=realtime; backend_token if your backend needs it
+# backend_token only if your backend needs it
 ```
 
 `terraform output ssm_secret_params` lists them all. The LiveKit key/secret are

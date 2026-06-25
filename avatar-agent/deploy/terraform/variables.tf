@@ -92,9 +92,9 @@ variable "agent_desired_count" {
 }
 
 variable "pipeline_mode" {
-  description = "Cognition pipeline: \"cascade\" (Deepgram+Anthropic+Cartesia) or \"realtime\" (OpenAI)."
+  description = "Cognition pipeline: \"realtime\" (OpenAI, needs only OPENAI_API_KEY) or \"cascade\" (Deepgram+Anthropic+Cartesia)."
   type        = string
-  default     = "cascade"
+  default     = "realtime"
 }
 
 variable "llm_model" {
