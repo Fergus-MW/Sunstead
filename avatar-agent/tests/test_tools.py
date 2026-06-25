@@ -159,6 +159,23 @@ def test_delegate_is_opt_in_not_in_base_tools():
     assert tools.lookup_context in tools.BASE_TOOLS
 
 
+async def test_skip_turn_raises_stop_response_and_logs():
+    from livekit.agents import StopResponse
+
+    rt = _runtime(_FakeBackend())
+    with pytest.raises(StopResponse):
+        await _call(tools.skip_turn)(_Ctx(rt))
+    # the skip is recorded for the post-call timeline
+    assert rt.tools_log.calls[-1].name == "skip_turn"
+    assert rt.tools_log.calls[-1].status == "ok"
+
+
+def test_skip_turn_is_always_available():
+    # Addressed-only behaviour relies on skip_turn being present in every mode.
+    assert tools.skip_turn in tools.BASE_TOOLS
+    assert tools.skip_turn in tools.BACKEND_TOOLS
+
+
 def test_summarizer_handles_empty():
     assert "didn't find" in tools._summarize_nodes({"nodes": []}).lower()
 

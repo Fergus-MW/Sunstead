@@ -17,11 +17,27 @@ from __future__ import annotations
 
 from typing import Any
 
-from livekit.agents import RunContext
+from livekit.agents import RunContext, StopResponse
 from livekit.agents.llm import function_tool
 
 from .backend import BackendError
 from .runtime import AgentRuntime
+
+
+@function_tool
+async def skip_turn(context: RunContext[AgentRuntime]) -> None:
+    """Stay silent this turn and say nothing at all. Call this whenever the latest
+    thing said was NOT addressed to you — for example the participants are talking
+    to each other, or your name was not mentioned and no question or request was
+    directed at you. Do not reply, interject, or narrate in those cases — call this
+    instead. When you are unsure whether you were addressed, prefer calling this.
+    """
+    # Record the skip for the post-call timeline, then halt response generation so
+    # the avatar produces no speech for this turn (LiveKit's StopResponse).
+    rt = context.userdata
+    async with rt.tools_log.span("skip_turn", {}) as call:
+        call.ok({"skipped": True})
+    raise StopResponse
 
 
 @function_tool
@@ -193,9 +209,11 @@ async def delegate(context: RunContext[AgentRuntime], intent: str, brief: str) -
         return "On it — I've handed that to the team and it'll show up on the dashboard shortly."
 
 
-# Tools the avatar ALWAYS has — read the KG + capture action items. Append here to
-# expose a new always-on tool; nothing else in the pipeline changes (CT-3).
+# Tools the avatar ALWAYS has — stay silent when not addressed, read the KG, and
+# capture action items. Append here to expose a new always-on tool; nothing else
+# in the pipeline changes (CT-3).
 BASE_TOOLS = [
+    skip_turn,
     lookup_context,
     get_entity,
     recent_activity,
