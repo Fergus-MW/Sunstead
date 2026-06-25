@@ -105,9 +105,15 @@ class Settings:
 
     def __post_init__(self) -> None:
         # defensive: ignore a base_url that isn't a real URL (e.g. a stray
-        # inline-comment value copied from .env.example) — fall back to direct API.
+        # inline-comment value copied from .env.example, or an empty
+        # `ANTHROPIC_BASE_URL=` injected by a docker env_file) — fall back to the
+        # direct API. The Anthropic SDK reads ANTHROPIC_BASE_URL straight from
+        # os.environ when we don't pass base_url, so a junk/empty value there
+        # breaks every client with a misleading "Connection error"; scrub it so
+        # the SDK uses its built-in default.
         if not self.anthropic_base_url.startswith("http"):
             self.anthropic_base_url = ""
+            os.environ.pop("ANTHROPIC_BASE_URL", None)
 
 
 def load() -> Settings:
