@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 type Status =
   | { kind: "idle" }
@@ -9,9 +9,65 @@ type Status =
   | { kind: "joined"; meetingId: string }
   | { kind: "error"; message: string };
 
+type Wind = { mx: number; my: number; vx: number };
+const STILL: Wind = { mx: 0.5, my: 1, vx: 0 };
+
 export default function Home() {
   const [link, setLink] = useState("");
   const [status, setStatus] = useState<Status>({ kind: "idle" });
+  const [wind, setWind] = useState<Wind>(STILL);
+  const svgRef = useRef<SVGSVGElement>(null);
+
+  // Mouse-as-wind: track cursor position + smoothed horizontal velocity in
+  // SVG-relative normalized coords (0..1). Trees sway proportional to wind.vx,
+  // attenuated by horizontal distance to cursor, by vertical proximity to the
+  // forest, and by tree height. When the mouse stops, vx decays to 0.
+  useEffect(() => {
+    let raf = 0;
+    let lastX = 0.5;
+    let lastT = performance.now();
+    let measuredVx = 0;
+    let mx = 0.5;
+    let my = 1;
+    let vxSmoothed = 0;
+
+    function onMove(e: MouseEvent) {
+      const svg = svgRef.current;
+      if (!svg) return;
+      const rect = svg.getBoundingClientRect();
+      const x = (e.clientX - rect.left) / rect.width;
+      const y = (e.clientY - rect.top) / rect.height;
+      const now = performance.now();
+      const dt = Math.max(now - lastT, 1);
+      measuredVx = ((x - lastX) / dt) * 1000;
+      mx = x;
+      my = y;
+      lastX = x;
+      lastT = now;
+    }
+
+    function tick() {
+      vxSmoothed = vxSmoothed * 0.85 + measuredVx * 0.15;
+      measuredVx *= 0.9;
+      setWind({ mx, my, vx: vxSmoothed });
+      raf = requestAnimationFrame(tick);
+    }
+
+    window.addEventListener("mousemove", onMove);
+    raf = requestAnimationFrame(tick);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      cancelAnimationFrame(raf);
+    };
+  }, []);
+
+  function sway(x: number, h: number, maxH: number) {
+    const tx = x / 1440;
+    const dx = tx - wind.mx;
+    const xFall = Math.exp(-(dx * dx) / (2 * 0.18 * 0.18));
+    const yFall = Math.max(0, Math.min(1, (wind.my - 0.2) / 0.6));
+    return wind.vx * 2 * xFall * yFall * (h / maxH);
+  }
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -45,6 +101,7 @@ export default function Home() {
 
       {/* Lapland landscape: layered pine forest */}
       <svg
+        ref={svgRef}
         aria-hidden
         viewBox="0 0 1440 420"
         preserveAspectRatio="xMidYMax slice"
@@ -91,11 +148,16 @@ export default function Home() {
             const x = i * 58 + (i % 3) * 6;
             const h = 60 + ((i * 7) % 40);
             const w = 28 + ((i * 5) % 10);
+            const angle = sway(x, h, 100) * 0.6;
             return (
-              <polygon
+              <g
                 key={`mid-${i}`}
-                points={`${x},${260 - h} ${x - w / 2},${260} ${x + w / 2},${260}`}
-              />
+                transform={`rotate(${angle.toFixed(3)} ${x} 260)`}
+              >
+                <polygon
+                  points={`${x},${260 - h} ${x - w / 2},${260} ${x + w / 2},${260}`}
+                />
+              </g>
             );
           })}
           <rect x="0" y="258" width="1440" height="40" />
@@ -108,9 +170,12 @@ export default function Home() {
             const h = 110 + ((i * 13) % 70);
             const w = 50 + ((i * 9) % 18);
             const tipY = 340 - h;
-            // Three-tier pine: stack of triangles
+            const angle = sway(x, h, 180);
             return (
-              <g key={`near-${i}`}>
+              <g
+                key={`near-${i}`}
+                transform={`rotate(${angle.toFixed(3)} ${x} 340)`}
+              >
                 <polygon
                   points={`${x},${tipY} ${x - w / 3},${tipY + h * 0.35} ${x + w / 3},${tipY + h * 0.35}`}
                 />
@@ -216,9 +281,6 @@ export default function Home() {
         </Link>
       </div>
 
-      <p className="relative z-20 mb-4 text-center text-[10px] uppercase tracking-[0.4em] text-[#f3ead3]/40">
-        24h daylight · midnight sun · perpetual quorum
-      </p>
     </main>
   );
 }
