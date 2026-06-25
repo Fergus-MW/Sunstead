@@ -77,6 +77,11 @@ class Settings(BaseSettings):
     gateway_url: str = Field(default="", alias="GATEWAY_URL")
     gateway_token: str = Field(default="", alias="GATEWAY_TOKEN")
     gateway_timeout: float = Field(default=5.0, alias="GATEWAY_TIMEOUT")
+    # Single delegation brain (DESIGN §6). Default: the avatar EMITS meeting.transcript
+    # and the planner does all routing — so the same path serves the mock and the real
+    # avatar. Set true to instead give the avatar its own `delegate()` tool (then run
+    # the planner OFF, or both will delegate the same utterance).
+    avatar_delegates: bool = Field(default=False, alias="AVATAR_DELEGATES")
 
     # ── Observability ──
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")

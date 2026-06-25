@@ -1,7 +1,13 @@
 # Avatar → agent-suite delegation — ✅ SHIPPED
 
 > This was a handoff to *build* the avatar's delegation wire. **It's built.** Kept as a
-> pointer; the live contract is the code below + [DESIGN.md](DESIGN.md) §3 (seam option a).
+> pointer; the live contract is the code below + [DESIGN.md](DESIGN.md) §3/§6.
+
+> **Default brain = the planner, not `delegate()`.** The avatar emits each final user
+> utterance to the gateway's `POST /transcript` → `meeting.transcript`, and the planner
+> routes it (same path as `make mock`). The `delegate()` tool below is **opt-in** via
+> `AVATAR_DELEGATES=true` — use it only if you run the planner OFF (else both delegate the
+> same utterance). The `/tasks` contract is identical whichever brain calls it.
 
 The avatar hands heavy work to the agent suite through the gateway, fire-and-forget; the
 result surfaces on the FE dashboard (gateway `WS /stream`). The avatar never speaks Kafka.

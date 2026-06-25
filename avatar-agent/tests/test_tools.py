@@ -54,6 +54,7 @@ class _FakeGateway:
     def __init__(self, fail: BackendError | None = None) -> None:
         self.fail = fail
         self.delegated: list[dict] = []
+        self.transcripts: list[dict] = []
 
     async def delegate(self, *, intent, args, meeting_id, requested_by="avatar"):
         if self.fail is not None:
@@ -61,6 +62,9 @@ class _FakeGateway:
         record = {"intent": intent, "args": args, "meeting_id": meeting_id}
         self.delegated.append(record)
         return {"task_id": "tsk_abc123", "status": "accepted"}
+
+    async def publish_transcript(self, *, meeting_id, text, speaker=None, is_final=True):
+        self.transcripts.append({"meeting_id": meeting_id, "text": text, "speaker": speaker})
 
 
 def _call(fn):
@@ -145,6 +149,14 @@ async def test_delegate_degrades_on_gateway_error():
     out = await _call(tools.delegate)(_Ctx(rt), intent="read_git", brief="who owns auth")
     assert "couldn't hand that off" in out.lower()
     assert rt.tools_log.calls[-1].status == "error"
+
+
+def test_delegate_is_opt_in_not_in_base_tools():
+    # Default brain is the planner (avatar emits transcript), so delegate() must NOT be
+    # an always-on tool; it's only added when AVATAR_DELEGATES is set (agent.py).
+    assert tools.delegate not in tools.BASE_TOOLS
+    assert tools.delegate in tools.BACKEND_TOOLS
+    assert tools.lookup_context in tools.BASE_TOOLS
 
 
 def test_summarizer_handles_empty():

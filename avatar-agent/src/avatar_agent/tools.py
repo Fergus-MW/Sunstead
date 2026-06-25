@@ -193,15 +193,19 @@ async def delegate(context: RunContext[AgentRuntime], intent: str, brief: str) -
         return "On it — I've handed that to the team and it'll show up on the dashboard shortly."
 
 
-# The registry the Agent is built from. Append a function here to expose a new
-# tool; nothing else in the pipeline changes (CT-3).
-BACKEND_TOOLS = [
+# Tools the avatar ALWAYS has — read the KG + capture action items. Append here to
+# expose a new always-on tool; nothing else in the pipeline changes (CT-3).
+BASE_TOOLS = [
     lookup_context,
     get_entity,
     recent_activity,
     record_action_item,
-    delegate,
 ]
+
+# `delegate` is opt-in via AVATAR_DELEGATES (DESIGN §6). By default the avatar emits
+# `meeting.transcript` and the planner does the routing, so delegate() is excluded to
+# avoid two brains delegating the same utterance. agent.py composes the active set.
+BACKEND_TOOLS = [*BASE_TOOLS, delegate]  # full set (AVATAR_DELEGATES mode / back-compat)
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────

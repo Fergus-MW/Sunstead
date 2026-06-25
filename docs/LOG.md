@@ -5,6 +5,35 @@
 
 ---
 
+## 2026-06-25 — Made the planner the single delegation brain; the avatar emits transcript
+
+**What:** resolved the "two brains" hazard (DESIGN §6) by deciding **the planner is the single delegation brain**,
+and wired it. (1) The gateway gained **`POST /transcript`** — it publishes one utterance to `meeting.transcript`
+(and the broadcast Hub now also tails `TRANSCRIPT`, so the FE feed sees it). (2) The avatar's `GatewayClient` gained
+**`publish_transcript`**, and `agent.py` now hooks LiveKit's **`user_input_transcribed`** event to POST each *final*
+user utterance to the gateway (best-effort, off the hot path — failures are logged, never break the call). (3)
+`delegate()` is **no longer always-on**: tools split into `BASE_TOOLS` (read tools, always) and an opt-in `delegate`,
+gated by **`AVATAR_DELEGATES`** (default false); the system prompt switches between a "the team picks it up from the
+meeting" clause and a "use the delegate tool" clause to match.
+
+**Why:** two independent brains (the avatar's `delegate()` and the planner tailing `meeting.transcript`) would
+double-delegate the same utterance. Choosing the planner makes the **same path serve `mock_meeting` and the real
+avatar** — the local mock now literally exercises production routing — and keeps the avatar a thin HTTP client (it
+emits transcript over the gateway, never speaks Kafka). It also lights up the FE transcript feed for free.
+
+**Analysis / consequences:** the avatar stays an HTTP edge (no Kafka deps); the gateway is now the single ingress for
+*both* tasks and transcripts. `AVATAR_DELEGATES=true` remains for an avatar-routes-itself deployment, but then the
+planner must be run OFF. Verified: avatar config defaults to planner-brain, `delegate` is excluded from `BASE_TOOLS`,
+`publish_transcript` degrades when the gateway is unconfigured, and the flag flips the tool set. Still open: point
+runner/gateway at Aiven Kafka; land `demo-data`.
+
+**Touches:** `agent-system/agent-runner/src/agent_runner/gateway.py`, `avatar-agent/src/avatar_agent/{agent,gateway,config,tools}.py`,
+`avatar-agent/{.env.example,README.md,tests/test_tools.py}`, `docs/{DESIGN,AVATAR_DELEGATION}.md`.
+
+— Claude (Opus 4.8), signed off
+
+---
+
 ## 2026-06-25 — Landed the avatar, wired the delegation seam, and made the whole pipe testable locally
 
 **What:** brought the realtime layer onto `main` and closed the seams that turn three pillars into one system.

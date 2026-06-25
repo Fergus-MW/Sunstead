@@ -126,10 +126,16 @@ schema the model sees. Shipped tools (calling `central-kg-api`):
 | `get_entity(entity_id, hops)` | `GET /entity/{id}` | Expand one entity's neighborhood. |
 | `recent_activity(since)` | `GET /timeline` | What changed recently. |
 | `record_action_item(description, owner)` | `POST /update` | **Write** — capture a follow-up (idempotent). |
-| `delegate(intent, brief)` | gateway `POST /tasks` | **Hand off** — dispatch heavy work (build a site, dig into git, analyze data) to the async worker suite over Kafka. Fire-and-forget; result surfaces on the FE. |
+| `delegate(intent, brief)` | gateway `POST /tasks` | **Hand off** (opt-in) — dispatch heavy work to the async worker suite. See delegation brain below. |
 
-**Add a tool** (story CT-3): write a `@function_tool` async function and append
-it to `BACKEND_TOOLS`. The conversation loop in `agent.py` is untouched.
+**Delegation brain.** By default the avatar **emits each final user utterance** to the
+gateway's `POST /transcript` (→ `meeting.transcript`) and the **planner** does all routing
+— the same path `make mock` exercises, and it lights up the FE feed. So `delegate()` is
+**not** an always-on tool; set `AVATAR_DELEGATES=true` to give the avatar its own dispatch
+tool instead (then run the planner OFF). See [docs/DESIGN.md](../docs/DESIGN.md) §6.
+
+**Add a tool** (story CT-3): write a `@function_tool` async function and append it to
+`BASE_TOOLS`. The conversation loop in `agent.py` is untouched.
 
 Every tool **degrades gracefully** (CT-4): on a backend error/timeout it returns
 a sentence the avatar speaks ("I couldn't reach the knowledge base just now…")

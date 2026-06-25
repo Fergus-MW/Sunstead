@@ -105,18 +105,19 @@ a `mock_meeting` harness drives the whole pipe locally with no Recall/LiveKit.
 1. **Point runner/gateway at Aiven Kafka** (bootstrap + SASL creds) — flips local→cloud by env only.
 2. **Land `demo-data`** (the remaining unmerged, additive branch).
 3. **Decide the single delegation brain** (see §6) — planner vs avatar `delegate()` — so they don't both fire.
-4. **Avatar emits `meeting.transcript`** (if the planner is chosen as the brain) — lights up the FE transcript too.
-5. **Record the happy-path run** for the written submission: `aiven_pg_read` over `mcp-aiven` (the 34% proof) +
+4. **Record the happy-path run** for the written submission: `aiven_pg_read` over `mcp-aiven` (the 34% proof) +
    the ask-box → Kafka → agent → live-result loop.
 
 Both trajectories — **win the live demo** and **win the written Anthropic submission** — are served by #1–#5.
 
-## 6. Open decisions
+## 6. Decisions
 
-- **One delegation brain.** Two now exist: the avatar's `delegate()` (HTTP→gateway) and the `planner`
-  (consumes `meeting.transcript`). They must not both delegate the same utterance. *Recommendation:* avatar emits
-  `meeting.transcript`, the **planner** is the single brain (same path serves the `mock_meeting` and the real
-  avatar), with `delegate()` kept as an explicit "go do X" fast-path. §3 / [OVERVIEW.md](OVERVIEW.md).
+- **One delegation brain — DECIDED & shipped: the planner.** The avatar emits each final user utterance to the
+  gateway's `/transcript` → `meeting.transcript`, and the **planner** does all routing — so the *same* path serves
+  the `mock_meeting` harness and the real avatar. `delegate()` is no longer an always-on avatar tool; it's opt-in via
+  `AVATAR_DELEGATES=true` (which then expects the planner to be run OFF, or both delegate the same utterance).
+  Implemented in `avatar-agent` (`agent.py` transcript hook + tool gating, `gateway.py:publish_transcript`,
+  `config.py:avatar_delegates`) and the gateway (`POST /transcript`). §3.
 - **Spoken vs FE-only results** — FE-only for the demo; spoken is a later notify edge. §3.
 - **Doc consolidation** — fold PLAN/AGENT_SYSTEM/HACKINFO detail into DESIGN/OVERVIEW as we go; keep them as deep
   references meanwhile.

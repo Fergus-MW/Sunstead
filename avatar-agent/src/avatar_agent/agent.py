@@ -10,6 +10,7 @@ Predownload model files (VAD / turn detector), e.g. in the Docker build:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from dotenv import load_dotenv
@@ -20,6 +21,7 @@ from livekit.agents import (
     JobContext,
     MetricsCollectedEvent,
     RunContext,
+    UserInputTranscribedEvent,
     cli,
     metrics,
 )
@@ -31,12 +33,13 @@ from .observability import CallArtifact, ToolCallLog
 from .dispatch import meeting_id_for_room
 from .gateway import GatewayClient
 from .runtime import AgentRuntime
-from .tools import BACKEND_TOOLS
+from .tools import BASE_TOOLS, delegate
 
 load_dotenv()
 logger = logging.getLogger("avatar-agent")
 
-INSTRUCTIONS = (
+# Base persona — read the KG, capture action items, stay conversational.
+_BASE_INSTRUCTIONS = (
     "You are Sunstead, a helpful AI teammate present as a live video avatar in a "
     "meeting. You can see the conversation transcript and speak back into the call. "
     "Keep replies short and conversational — one or two sentences — since people are "
@@ -44,12 +47,26 @@ INSTRUCTIONS = (
     "When someone asks about company data — people, projects, tasks, code, documents, "
     "or recent activity — use your tools to look it up before answering, and speak the "
     "result naturally. Only record an action item when you are explicitly asked to "
-    "capture a task or follow-up. When someone asks you to BUILD or DO real work — a "
-    "web page, a code-history investigation, a data analysis — use the delegate tool "
-    "to hand it to the specialist team, and say you're on it; the result shows up on "
-    "their dashboard. If a tool fails, say so briefly and carry on; never invent data "
-    "you couldn't retrieve."
+    "capture a task or follow-up. "
 )
+# Default (planner is the single brain): the team picks up build/do requests from the
+# transcript automatically, so the avatar just acknowledges them out loud.
+_PLANNER_CLAUSE = (
+    "When someone asks the team to BUILD or DO real work — a web page, a code-history "
+    "investigation, a data analysis — acknowledge it naturally and say the team is on it; "
+    "they pick the request up from the meeting automatically, so you don't act further on it. "
+)
+# AVATAR_DELEGATES mode: the avatar dispatches the work itself via the delegate tool.
+_DELEGATE_CLAUSE = (
+    "When someone asks you to BUILD or DO real work — a web page, a code-history "
+    "investigation, a data analysis — use the delegate tool to hand it to the specialist "
+    "team, and say you're on it; the result shows up on their dashboard. "
+)
+_TAIL = "If a tool fails, say so briefly and carry on; never invent data you couldn't retrieve."
+
+
+def _instructions(cfg: Settings) -> str:
+    return _BASE_INSTRUCTIONS + (_DELEGATE_CLAUSE if cfg.avatar_delegates else _PLANNER_CLAUSE) + _TAIL
 
 # Silero VAD is expensive to construct; cache it across jobs in the worker
 # process (effectively a prewarm after the first session). Cascade mode only.
@@ -147,6 +164,30 @@ async def entrypoint(ctx: JobContext) -> None:
     def _on_metrics(ev: MetricsCollectedEvent) -> None:
         metrics.log_metrics(ev.metrics)
 
+    # ── Single delegation brain (DESIGN §6): publish each FINAL user utterance to the
+    # gateway → `meeting.transcript`, so the planner routes it and the FE feed shows it.
+    # Best-effort and off the hot path; transcript emission must never disrupt the call. ──
+    _bg: set[asyncio.Task] = set()
+
+    @session.on("user_input_transcribed")
+    def _on_user_transcript(ev: UserInputTranscribedEvent) -> None:
+        if not ev.is_final or not (ev.transcript or "").strip() or not gateway.enabled:
+            return
+
+        async def _emit() -> None:
+            try:
+                await gateway.publish_transcript(
+                    meeting_id=runtime.meeting_id,
+                    text=ev.transcript,
+                    speaker=getattr(ev, "speaker_id", None),
+                )
+            except Exception:  # never let transcript emission break the call
+                logger.warning("failed to publish transcript", exc_info=True)
+
+        t = asyncio.create_task(_emit())
+        _bg.add(t)
+        t.add_done_callback(_bg.discard)
+
     # ── Post-call artifact: transcript + tool-call timeline (OB-1) ──
     async def _on_shutdown() -> None:
         try:
@@ -182,8 +223,11 @@ async def entrypoint(ctx: JobContext) -> None:
     )
     await avatar.start(session, room=ctx.room)
 
+    # Default: planner is the single brain (avatar emits transcript above), so the
+    # avatar carries read tools only. AVATAR_DELEGATES adds the delegate() tool.
+    tools = [*BASE_TOOLS, delegate] if cfg.avatar_delegates else list(BASE_TOOLS)
     await session.start(
-        agent=Agent(instructions=INSTRUCTIONS, tools=BACKEND_TOOLS),
+        agent=Agent(instructions=_instructions(cfg), tools=tools),
         room=ctx.room,
     )
 

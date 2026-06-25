@@ -84,6 +84,23 @@ class GatewayClient:
         except ValueError as exc:
             raise BackendError("the task gateway returned a malformed response") from exc
 
+    async def publish_transcript(
+        self, *, meeting_id: str, text: str, speaker: str | None = None, is_final: bool = True
+    ) -> None:
+        """Post one spoken utterance to the gateway's `/transcript`, which publishes it
+        to `meeting.transcript`. The planner routes it; the FE feed shows it. Best-effort:
+        transcript emission must never disrupt the call, so failures are swallowed by the
+        caller (this raises BackendError; the agent's handler logs and moves on)."""
+        if not self.enabled:
+            raise BackendError("transcript publishing isn't configured")
+        payload = {"text": text, "meeting_id": meeting_id, "speaker": speaker, "is_final": is_final}
+        try:
+            resp = await self._http().post("/transcript", json=payload)
+        except httpx.HTTPError as exc:
+            raise BackendError("the gateway was unreachable") from exc
+        if resp.status_code >= 400:
+            raise BackendError(_safe_detail(resp), status=resp.status_code)
+
 
 def _safe_detail(resp: httpx.Response) -> str:
     try:
