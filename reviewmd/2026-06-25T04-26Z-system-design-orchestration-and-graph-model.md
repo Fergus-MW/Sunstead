@@ -145,7 +145,7 @@ The dead pgvector path caps retrieval quality. Two honest options:
 - **(A) Commit to BM25 + trigram + graph expansion.** The snapshot already recommends leading with this; `/search` wires BM25→CTE. For the orchestrator's *entity resolution* ("Sunstead" → node) trigram is sufficient. Lowest effort; fix the docs to stop claiming semantic search.
 - **(B) Wire a real embedder** (Voyage AI / OpenAI / local sentence-transformers — the adapter slot is already there in [`embeddings.py`](../central-kg-api/app/embeddings.py)) and backfill. This is the single biggest lever for "agents execute *great* queries" — semantic recall ("what relates to pricing-ish"), research-finding dedup, and grounding beyond exact names. Cost: one embed call per node on write + a backfill job; then `ANALYZE` and tune ivfflat `lists`.
 
-Recommendation: **(A) now** (it unblocks grounding for the demo), **(B) as the top retrieval upgrade** when there's time. Don't half-claim semantic search meanwhile.
+**DECIDED — (A); not pursuing embeddings.** Retrieval is BM25 + trigram name-match + recursive-CTE graph expansion (the `/search` path), full stop. The orchestrator's entity resolution uses trigram on `name` (enough for "Sunstead" → node). The dead ivfflat index stays as harmless scaffolding but is not on the roadmap. Stop claiming "pgvector semantic search" in the docs — lead with BM25 + graph. Rationale: it's the honest working path, it survives a judge's question, and it removes an embedder dependency/cost on the critical path.
 
 ### B.6 Scope / multi-source correctness (know when it bites)
 
@@ -202,7 +202,7 @@ Sequenced by leverage-per-hour, cheapest first. Each phase is independently ship
 
 1. **One graph, two layers** (entity `nodes` + episodic `events`/scoped-nodes) — agreed? This is the load-bearing modeling call.
 2. **Episode-key fix now** (Phase 0) — the meeting-merge bug is live data loss; fix independent of everything else?
-3. **Embeddings: option (A) BM25/trigram now, (B) real embedder later** — or invest in (B) up front?
+3. **Embeddings — DECIDED: not pursuing.** Retrieval = BM25 + trigram + recursive-CTE graph expansion; no embedder. (B.5)
 4. **Orchestrator location** — fold into the planner process (recommended, lowest friction) vs a separate "conductor" service (DESIGN §7's longer-term shape)?
 5. **Effort vocabulary** — `quick/standard/deep` (3) vs a finer scale? 3 is enough to start.
 
