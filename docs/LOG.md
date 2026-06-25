@@ -5,6 +5,33 @@
 
 ---
 
+## 2026-06-25 - Made mission control operator-friendly: prompt-first dispatch + focused task views
+
+**What:** changed the dashboard from a JSON-first operator surface into a plain prompt flow. The ask box now defaults
+to the useful `ask` intent, exposes an intent dropdown, writes the typed prompt into the receiving agent's real key
+(`question`, `brief`, or `text`), and keeps the old raw args editor behind an **Advanced JSON** toggle. The task board
+now has clickable digest filters (`all`, `active`, `stuck`, `grounded`, `flagged`, `done`, `failed`), shows filtered
+counts in the Agents header, and lets the operator click one card open at a time for the detailed steps/trace/result
+view while keeping collapsed cards scan-friendly.
+
+**Why:** the old ask box forced users to hand-edit `{ "question": "..." }`, which made the dashboard feel like an API
+console instead of mission control. The flat card grid had the same problem at fleet scale: the digest noticed active,
+flagged, and failed states, but those numbers were not actionable. The operator should be able to ask in plain text,
+pick the intent, click the suspicious count, and focus the one task that needs attention.
+
+**Analysis / consequences:** kept the dispatch contract unchanged (`POST /api/tasks` still receives `{ intent, args,
+meeting_id }`), so this is a front-end ergonomics change rather than a gateway/agent contract change. Advanced JSON
+still supports extra fields like `style` for web tasks. Filtering is derived from the same `tasks`/`traces` inputs as
+the digest, so the count and visible list cannot drift. Verified with `npm.cmd run lint`, `npm.cmd run build`
+(sandboxed build needed network for Next Google Fonts, then passed), and `GET /dashboard` on the existing local dev
+server returned 200.
+
+**Touches:** `meet-joiner/src/app/dashboard/{AskBox,page}.tsx`, `docs/LOG.md`.
+
+- Codex (GPT-5), signed off
+
+---
+
 ## 2026-06-25 — Reconciled all docs to the six-agent reality (the suite grew without a paper trail)
 
 **What:** a full documentation pass aligning every README + the doc system to the current code. The trigger: the agent

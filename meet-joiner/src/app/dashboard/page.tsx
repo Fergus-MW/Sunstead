@@ -392,16 +392,60 @@ const TONE: Record<Tone, string> = {
 };
 
 // One number in the digest bar — the conductor's-eye glance.
-function Stat({ label, value, tone, pulse }: { label: string; value: number; tone: Tone; pulse?: boolean }) {
-  return (
-    <div className="flex min-w-[3.5rem] flex-col items-center px-3">
+type TaskFilter = "all" | "active" | "stuck" | "grounded" | "flagged" | "completed" | "failed";
+
+const FILTER_LABEL: Record<TaskFilter, string> = {
+  all: "all",
+  active: "active",
+  stuck: "stuck",
+  grounded: "grounded",
+  flagged: "flagged",
+  completed: "done",
+  failed: "failed",
+};
+
+function taskMatchesFilter(row: TaskRow, filter: TaskFilter, trace: TaskTrace | undefined, now: number): boolean {
+  if (filter === "all") return true;
+  if (filter === "active") return !row.terminal;
+  if (filter === "stuck") return !row.terminal && liveAgeMs(row.lastTs, trace?.ts ?? 0, now) > STUCK_MS;
+  if (filter === "grounded") return isChecked(row.verdict) && !!row.verdict?.grounded;
+  if (filter === "flagged") return isFlagged(row.verdict);
+  return row.terminal === filter;
+}
+
+function Stat({
+  label,
+  value,
+  tone,
+  pulse,
+  selected,
+  onClick,
+}: {
+  label: string;
+  value: number;
+  tone: Tone;
+  pulse?: boolean;
+  selected?: boolean;
+  onClick?: () => void;
+}) {
+  const className = `flex min-w-[3.5rem] flex-col items-center px-3 py-1 ${
+    onClick ? "rounded transition-colors hover:bg-[#f3ead3]/8 focus:outline-none focus:ring-1 focus:ring-[#f3ead3]/30" : ""
+  } ${selected ? "bg-[#f3ead3]/10" : ""}`;
+  const content = (
+    <>
       <span
         className={`text-lg font-semibold leading-none tabular-nums ${TONE[tone]} ${pulse && value > 0 ? "animate-pulse" : ""}`}
       >
         {value}
       </span>
       <span className="mt-1 text-[9px] uppercase tracking-[0.2em] text-[#f3ead3]/40">{label}</span>
-    </div>
+    </>
+  );
+  if (!onClick) return <div className={className}>{content}</div>;
+  return (
+    <button type="button" onClick={onClick} aria-pressed={selected} className={className}>
+      {content}
+    </button>
   );
 }
 
@@ -478,12 +522,16 @@ const TaskCard = memo(function TaskCard({
   trace,
   now,
   isStopping,
+  expanded,
+  onToggle,
   onStop,
 }: {
   row: TaskRow;
   trace?: TaskTrace;
   now: number;
   isStopping: boolean;
+  expanded: boolean;
+  onToggle: (taskId: string) => void;
   onStop: (taskId: string) => void;
 }) {
   return (
@@ -491,7 +539,15 @@ const TaskCard = memo(function TaskCard({
       className="rounded-lg border border-[#f3ead3]/12 bg-black/25 p-3 transition-colors hover:border-[#f3ead3]/25"
       style={{ borderLeft: `3px solid ${accentFor(row)}` }}
     >
-      <div className="flex items-center gap-2">
+      <button
+        type="button"
+        onClick={() => onToggle(row.taskId)}
+        aria-expanded={expanded}
+        className="flex w-full items-center gap-2 rounded text-left focus:outline-none focus:ring-1 focus:ring-[#f3ead3]/25"
+      >
+        <span className="w-3 shrink-0 text-[10px] text-[#f3ead3]/45" aria-hidden>
+          {expanded ? "v" : ">"}
+        </span>
         {row.intentHint && (
           <span className="shrink-0 rounded bg-[#f3ead3]/8 px-1.5 py-0.5 text-[10px] text-[#f3ead3]/65">
             {row.intentHint}
@@ -502,11 +558,13 @@ const TaskCard = memo(function TaskCard({
           <VerdictBadge v={row.verdict} />
           <StatusPill row={row} />
         </span>
-      </div>
+      </button>
 
       {row.detail && <p className="mt-1.5 text-xs text-[#f3ead3]/60">{row.detail}</p>}
 
-      <StepsTimeline steps={row.steps} terminal={!!row.terminal} />
+      {expanded && (
+        <>
+          <StepsTimeline steps={row.steps} terminal={!!row.terminal} />
 
       <TraceView trace={trace} terminal={!!row.terminal} />
 
@@ -550,6 +608,8 @@ const TaskCard = memo(function TaskCard({
           )}
         </div>
       )}
+        </>
+      )}
 
       <div className="mt-2 flex items-center gap-2 text-[10px] text-[#f3ead3]/30">
         <span title={fmtTime(row.lastTs)}>{relativeTime(row.lastTs, now)}</span>
@@ -582,6 +642,8 @@ export default function Dashboard() {
   const [meetingId, setMeetingId] = useState("");
   // A 2s tick so relative times and "stuck" status stay live even when no events arrive.
   const [now, setNow] = useState(() => Date.now());
+  const [filter, setFilter] = useState<TaskFilter>("all");
+  const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 2000);
     return () => clearInterval(id);
@@ -619,6 +681,16 @@ export default function Dashboard() {
     }
     return d;
   }, [tasks, traces, now]);
+  const filteredTasks = useMemo(
+    () => tasks.filter((task) => taskMatchesFilter(task, filter, traces[task.taskId], now)),
+    [tasks, filter, traces, now],
+  );
+  const selectFilter = useCallback((next: TaskFilter) => {
+    setFilter((current) => (current === next ? "all" : next));
+  }, []);
+  const toggleTask = useCallback((taskId: string) => {
+    setExpandedTaskId((current) => (current === taskId ? null : taskId));
+  }, []);
 
   // Operator stop (docs/DESIGN.md §7): POST to the control channel; the cancelled result
   // arrives back over the WS like any other terminal state. Optimistically disable the button.
@@ -686,12 +758,13 @@ export default function Dashboard() {
           />
         </div>
         <div className="ml-auto flex items-stretch divide-x divide-[#f3ead3]/10">
-          <Stat label="active" value={digest.active} tone={digest.active ? "active" : "muted"} />
-          <Stat label="stuck" value={digest.stuck} tone={digest.stuck ? "bad" : "muted"} pulse />
-          <Stat label="grounded" value={digest.grounded} tone={digest.grounded ? "good" : "muted"} />
-          <Stat label="flagged" value={digest.flagged} tone={digest.flagged ? "warn" : "muted"} pulse />
-          <Stat label="done" value={digest.completed} tone={digest.completed ? "good" : "muted"} />
-          <Stat label="failed" value={digest.failed} tone={digest.failed ? "bad" : "muted"} />
+          <Stat label="all" value={tasks.length} tone={filter === "all" ? "default" : "muted"} selected={filter === "all"} onClick={() => setFilter("all")} />
+          <Stat label="active" value={digest.active} tone={digest.active ? "active" : "muted"} selected={filter === "active"} onClick={() => selectFilter("active")} />
+          <Stat label="stuck" value={digest.stuck} tone={digest.stuck ? "bad" : "muted"} pulse selected={filter === "stuck"} onClick={() => selectFilter("stuck")} />
+          <Stat label="grounded" value={digest.grounded} tone={digest.grounded ? "good" : "muted"} selected={filter === "grounded"} onClick={() => selectFilter("grounded")} />
+          <Stat label="flagged" value={digest.flagged} tone={digest.flagged ? "warn" : "muted"} pulse selected={filter === "flagged"} onClick={() => selectFilter("flagged")} />
+          <Stat label="done" value={digest.completed} tone={digest.completed ? "good" : "muted"} selected={filter === "completed"} onClick={() => selectFilter("completed")} />
+          <Stat label="failed" value={digest.failed} tone={digest.failed ? "bad" : "muted"} selected={filter === "failed"} onClick={() => selectFilter("failed")} />
         </div>
       </div>
 
@@ -706,24 +779,43 @@ export default function Dashboard() {
       <div className="flex min-h-0 flex-1">
         {/* Agent board — the centerpiece */}
         <section className="flex min-w-0 flex-1 flex-col">
-          <h2 className="flex items-center gap-2 border-b border-[#f3ead3]/10 px-4 py-2 text-[10px] uppercase tracking-[0.3em] text-[#f3ead3]/50">
-            Agents
-            <span className="text-[#f3ead3]/30">({tasks.length})</span>
-          </h2>
+          <div className="flex items-center justify-between gap-3 border-b border-[#f3ead3]/10 px-4 py-2">
+            <h2 className="flex items-center gap-2 text-[10px] uppercase tracking-[0.3em] text-[#f3ead3]/50">
+              Agents
+              <span className="text-[#f3ead3]/30">
+                ({filter === "all" ? tasks.length : `${filteredTasks.length}/${tasks.length}`})
+              </span>
+            </h2>
+            {filter !== "all" && (
+              <button
+                type="button"
+                onClick={() => setFilter("all")}
+                className="rounded border border-[#f3ead3]/15 px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-[#f3ead3]/55 hover:border-[#f3ead3]/40 hover:text-[#f3ead3]"
+              >
+                {FILTER_LABEL[filter]} x
+              </button>
+            )}
+          </div>
           <div className="min-h-0 flex-1 overflow-y-auto p-3">
             {tasks.length === 0 ? (
               <p className="px-1 py-16 text-center text-sm text-[#f3ead3]/35">
                 No agents running. Dispatch one from the right, or wait for the avatar to delegate from the meeting.
               </p>
+            ) : filteredTasks.length === 0 ? (
+              <p className="px-1 py-16 text-center text-sm text-[#f3ead3]/35">
+                No {FILTER_LABEL[filter]} agents match this view.
+              </p>
             ) : (
               <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(340px,1fr))]">
-                {tasks.map((row) => (
+                {filteredTasks.map((row) => (
                   <TaskCard
                     key={row.taskId}
                     row={row}
                     trace={traces[row.taskId]}
                     now={now}
                     isStopping={stopping.has(row.taskId)}
+                    expanded={expandedTaskId === row.taskId}
+                    onToggle={toggleTask}
                     onStop={stop}
                   />
                 ))}

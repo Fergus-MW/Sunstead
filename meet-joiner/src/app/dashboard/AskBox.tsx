@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
 import { INTENT_META, INTENT_TEMPLATES, INTENTS, type Intent } from "./types";
 
 type Sent =
@@ -9,45 +9,108 @@ type Sent =
   | { kind: "ok"; taskId: string; topic: string }
   | { kind: "error"; message: string };
 
+const DEFAULT_INTENT: Intent = "ask";
+
+function parseTemplate(intent: Intent): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(INTENT_TEMPLATES[intent]);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    // The templates are local constants; fall back defensively if one is edited badly.
+  }
+  return {};
+}
+
+function formatArgs(args: Record<string, unknown>): string {
+  return JSON.stringify(args, null, 2);
+}
+
+function promptKeyFor(intent: Intent): string | null {
+  return INTENT_META[intent].promptKey ?? (intent === "echo" ? "text" : null);
+}
+
+function promptFromArgs(intent: Intent, args: Record<string, unknown>): string {
+  const key = promptKeyFor(intent);
+  if (!key) return "";
+  const value = args[key];
+  return typeof value === "string" ? value : "";
+}
+
+function argsWithPrompt(intent: Intent, prompt: string): Record<string, unknown> {
+  const args = parseTemplate(intent);
+  const key = promptKeyFor(intent);
+  if (key) args[key] = prompt;
+  return args;
+}
+
+function intentLabel(intent: Intent): string {
+  return intent.replaceAll("_", " ");
+}
+
 // Dispatch a task to the agent suite via the gateway (proxied through /api/tasks).
 export default function AskBox({ meetingId }: { meetingId: string }) {
-  const [intent, setIntent] = useState<Intent>("echo");
-  const [args, setArgs] = useState<string>(INTENT_TEMPLATES.echo);
+  const initialArgs = parseTemplate(DEFAULT_INTENT);
+  const [intent, setIntent] = useState<Intent>(DEFAULT_INTENT);
+  const [prompt, setPrompt] = useState(() => promptFromArgs(DEFAULT_INTENT, initialArgs));
+  const [rawArgs, setRawArgs] = useState(() => formatArgs(initialArgs));
+  const [advanced, setAdvanced] = useState(false);
   const [sent, setSent] = useState<Sent>({ kind: "idle" });
 
   function onIntentChange(next: Intent) {
+    const nextArgs = parseTemplate(next);
     setIntent(next);
-    setArgs(INTENT_TEMPLATES[next]);
+    setPrompt(promptFromArgs(next, nextArgs));
+    setRawArgs(formatArgs(nextArgs));
     setSent({ kind: "idle" });
   }
 
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    let parsedArgs: unknown;
-    try {
-      parsedArgs = args.trim() ? JSON.parse(args) : {};
-    } catch {
-      setSent({ kind: "error", message: "args is not valid JSON" });
-      return;
+  function onAdvancedChange(next: boolean) {
+    if (next) {
+      setRawArgs(formatArgs(argsWithPrompt(intent, prompt)));
+    } else {
+      try {
+        const parsed = JSON.parse(rawArgs);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          setPrompt(promptFromArgs(intent, parsed as Record<string, unknown>));
+        }
+      } catch {
+        // Keep the last plain prompt if the advanced draft is not parseable yet.
+      }
     }
-    // Guard the silent no-op: each non-echo intent reads its prompt from one key
-    // (question/brief). If that key is missing or blank, the agent falls back to a
-    // nonsense prompt and "completes" without doing what was asked — so reject it here.
-    const { promptKey } = INTENT_META[intent];
+    setAdvanced(next);
+    setSent({ kind: "idle" });
+  }
+
+  function readAdvancedArgs(): Record<string, unknown> | null {
+    try {
+      const parsed = rawArgs.trim() ? JSON.parse(rawArgs) : {};
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        setSent({ kind: "error", message: "Args JSON must be an object." });
+        return null;
+      }
+      return parsed as Record<string, unknown>;
+    } catch {
+      setSent({ kind: "error", message: "Args JSON is not valid." });
+      return null;
+    }
+  }
+
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    const parsedArgs = advanced ? readAdvancedArgs() : argsWithPrompt(intent, prompt.trim());
+    if (!parsedArgs) return;
+
+    const promptKey = promptKeyFor(intent);
     if (promptKey) {
-      const obj =
-        parsedArgs && typeof parsedArgs === "object" && !Array.isArray(parsedArgs)
-          ? (parsedArgs as Record<string, unknown>)
-          : {};
-      const v = obj[promptKey];
-      if (typeof v !== "string" || !v.trim()) {
-        setSent({
-          kind: "error",
-          message: `“${intent}” reads its prompt from "${promptKey}" — that field is empty. Put your request there.`,
-        });
+      const value = parsedArgs[promptKey];
+      if (typeof value !== "string" || !value.trim()) {
+        setSent({ kind: "error", message: `Enter a ${promptKey} before sending.` });
         return;
       }
     }
+
     setSent({ kind: "sending" });
     try {
       const res = await fetch("/api/tasks", {
@@ -71,40 +134,63 @@ export default function AskBox({ meetingId }: { meetingId: string }) {
 
   return (
     <form onSubmit={onSubmit} className="space-y-2">
-      <label className="text-[10px] uppercase tracking-[0.3em] text-[#f3ead3]/50">
-        Dispatch a task
-      </label>
+      <div className="flex items-center justify-between gap-3">
+        <label className="text-[10px] uppercase tracking-[0.3em] text-[#f3ead3]/50">
+          Dispatch a task
+        </label>
+        <label className="inline-flex cursor-pointer items-center gap-2 text-[10px] uppercase tracking-[0.18em] text-[#f3ead3]/45">
+          <input
+            type="checkbox"
+            checked={advanced}
+            onChange={(e) => onAdvancedChange(e.target.checked)}
+            className="h-3.5 w-3.5 rounded border-[#f3ead3]/20 bg-black/40 accent-[#f3ead3]"
+          />
+          Advanced JSON
+        </label>
+      </div>
       <select
         value={intent}
         onChange={(e) => onIntentChange(e.target.value as Intent)}
-        className="w-full rounded-md border border-[#f3ead3]/15 bg-black/40 px-3 py-2 text-sm outline-none focus:border-[#f3ead3]/60"
+        className="w-full rounded-md border border-[#f3ead3]/15 bg-black/40 px-3 py-2 text-sm capitalize outline-none focus:border-[#f3ead3]/60"
       >
         {INTENTS.map((i) => (
           <option key={i} value={i} className="bg-[#0b1a17]">
-            {i}
+            {intentLabel(i)}
           </option>
         ))}
       </select>
       <p className="text-[11px] leading-snug text-[#f3ead3]/45">
         {INTENT_META[intent].blurb}
       </p>
-      <textarea
-        value={args}
-        onChange={(e) => setArgs(e.target.value)}
-        rows={3}
-        spellCheck={false}
-        className="w-full rounded-md border border-[#f3ead3]/15 bg-black/40 px-3 py-2 font-mono text-xs outline-none focus:border-[#f3ead3]/60"
-      />
+      {advanced ? (
+        <textarea
+          aria-label="Args JSON"
+          value={rawArgs}
+          onChange={(e) => setRawArgs(e.target.value)}
+          rows={5}
+          spellCheck={false}
+          className="w-full rounded-md border border-[#f3ead3]/15 bg-black/40 px-3 py-2 font-mono text-xs outline-none focus:border-[#f3ead3]/60"
+        />
+      ) : (
+        <textarea
+          aria-label="Task prompt"
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          rows={4}
+          className="w-full rounded-md border border-[#f3ead3]/15 bg-black/40 px-3 py-2 text-sm leading-relaxed outline-none placeholder:text-[#f3ead3]/25 focus:border-[#f3ead3]/60"
+          placeholder="What should the agent do?"
+        />
+      )}
       <button
         type="submit"
         disabled={sent.kind === "sending"}
         className="w-full rounded-md bg-[#f3ead3] px-3 py-2 text-sm font-medium text-[#1d2e4a] transition-colors hover:bg-white disabled:cursor-not-allowed disabled:opacity-40"
       >
-        {sent.kind === "sending" ? "Dispatching…" : "Send task"}
+        {sent.kind === "sending" ? "Dispatching..." : "Send task"}
       </button>
       {sent.kind === "ok" && (
         <p className="text-xs text-emerald-200/80">
-          accepted · <span className="font-mono">{sent.taskId}</span> → {sent.topic}
+          accepted - <span className="font-mono">{sent.taskId}</span> - {sent.topic}
         </p>
       )}
       {sent.kind === "error" && (
