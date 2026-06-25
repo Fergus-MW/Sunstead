@@ -171,6 +171,12 @@ export default function Home() {
             <div className="mt-1 font-mono text-xs text-[#f3ead3]/60">
               meeting · {status.meetingId}
             </div>
+            <Link
+              href={`/dashboard?meeting_id=${encodeURIComponent(status.meetingId)}`}
+              className="mt-2 inline-block text-xs underline underline-offset-4 transition-colors hover:text-white"
+            >
+              Watch the agents work →
+            </Link>
           </div>
         )}
         {status.kind === "error" && (

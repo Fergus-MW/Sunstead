@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import AskBox from "./AskBox";
 import { useStream, type ConnState } from "./useStream";
 import type { Artifact, Envelope } from "./types";
@@ -80,6 +80,13 @@ function StatusPill({ row }: { row: TaskRow }) {
 
 export default function Dashboard() {
   const [meetingId, setMeetingId] = useState("");
+  // Seed the meeting filter from ?meeting_id= (the landing page links here scoped
+  // to the call the envoy just joined), so the avatar's delegated results show up
+  // without the user retyping the id. Done on mount to avoid a hydration mismatch.
+  useEffect(() => {
+    const fromUrl = new URLSearchParams(window.location.search).get("meeting_id");
+    if (fromUrl) setMeetingId(fromUrl);
+  }, []);
   const { events, state, clear } = useStream({ meetingId: meetingId || undefined });
   const tasks = useMemo(() => deriveTasks(events), [events]);
 
