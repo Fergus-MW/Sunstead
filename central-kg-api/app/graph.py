@@ -166,11 +166,33 @@ async def neighbors(session: AsyncSession, node_id: UUID, limit: int = 50) -> tu
 
 
 async def subgraph_bfs(
-    session: AsyncSession, center_ids: list[UUID], hops: int = 2, node_limit: int = 100
+    session: AsyncSession,
+    center_ids: list[UUID],
+    hops: int = 2,
+    node_limit: int = 100,
+    edge_types: list[str] | None = None,
 ) -> tuple[list[Node], list[Edge]]:
-    """BFS hop-bounded subgraph using a recursive CTE."""
+    """BFS hop-bounded subgraph using a recursive CTE.
+
+    When `edge_types` is supplied the traversal *only* follows edges of
+    those types. The default is the "demo-relevant" allowlist below; it
+    skips weakly-signalled `relates_to` / `re_exports` edges which
+    massively over-expand the frontier on hubby nodes like `Stream`.
+    """
     if not center_ids:
         return [], []
+
+    # Default allowlist: the edges that actually carry signal for a
+    # standup-style query. `relates_to` and `re_exports` are intentionally
+    # left out — graphify emits thousands of them and they're rarely
+    # what the listener wants when expanding context.
+    if edge_types is None:
+        edge_types = [
+            "mentions", "said", "in_meeting", "attended",
+            "authored", "touches",
+            "imports", "calls", "part_of", "derived_from", "rationale_for",
+        ]
+
     cte_sql = text(
         """
         WITH RECURSIVE frontier(node_id, depth) AS (
@@ -180,14 +202,19 @@ async def subgraph_bfs(
                         ELSE e.source_node_id END,
                    f.depth + 1
             FROM frontier f
-            JOIN edges e ON e.source_node_id = f.node_id OR e.target_node_id = f.node_id
+            JOIN edges e
+              ON (e.source_node_id = f.node_id OR e.target_node_id = f.node_id)
+              AND e.type = ANY(:etypes)
             WHERE f.depth < :hops
         )
         SELECT DISTINCT node_id FROM frontier LIMIT :nlimit;
         """
     )
     rows = (
-        await session.execute(cte_sql, {"center": center_ids, "hops": hops, "nlimit": node_limit})
+        await session.execute(
+            cte_sql,
+            {"center": center_ids, "hops": hops, "nlimit": node_limit, "etypes": edge_types},
+        )
     ).all()
     ids = [r._mapping["node_id"] for r in rows]
     if not ids:
