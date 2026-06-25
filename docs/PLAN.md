@@ -145,11 +145,11 @@ These are settled by the research pass — call them out so we don't relitigate:
    run as plain SQL through the MCP — no FastAPI hop. Our Lambda becomes the *write enrichment* path (Claude
    extraction → upsert), not the read path.
 
-2. **Kafka via Aiven MCP for the agent suite.** Listener publishes to `agent.tasks.*`; workers produce results back on
-   `agent.results` via `aiven_kafka_topic_message_produce`. *Consumption* depends on the host: an EC2/long-running
-   worker can poll `aiven_kafka_topic_message_list`, but our **Lambda** workers are triggered by an AWS Kafka
-   event-source mapping (the managed poller *is* the consumer — see [AGENT_SYSTEM.md](AGENT_SYSTEM.md) §2/§4). Either
-   way, every data *operation* stays on MCP.
+2. **Kafka is the dispatch spine; KG is the MCP showcase.** The listener publishes `agent.tasks.*`; our single
+   long-lived **agent-runner container** consumes with a direct `aiokafka` consumer and produces `agent.results` /
+   `agent.activity` with a direct producer — a publish must not cost an LLM round-trip (realtime). The MCP depth is
+   carried by **KG reads/writes** (`aiven_pg_read`/`aiven_pg_write` over a warm local `mcp-aiven` session) +
+   provisioning. See [AGENT_SYSTEM.md](AGENT_SYSTEM.md) §3–§3.5.
 
 3. **Provision the remaining Aiven services via MCP, on camera / in commits.** Kafka cluster + OpenSearch via Aiven
    MCP tool calls during the build, not `avn` CLI. That's the visible evidence judges will look for. The Postgres
@@ -207,24 +207,23 @@ this FastAPI."**
 
 ## 3.6 Deployment topology (where each piece runs)
 
-The system is **multi-host by design** — serverless where work is per-task and bursty, always-on where a process
-must hold open connections. (Agent-suite specifics: [AGENT_SYSTEM.md](AGENT_SYSTEM.md) §3.)
+The agent suite is **one long-lived container** — it must hold a Kafka consumer, run minute-long web builds, and
+keep a warm local MCP session, none of which suit Lambda. **Realtime latency is a first-class constraint** (see
+[AGENT_SYSTEM.md](AGENT_SYSTEM.md) §3.5).
 
 | Component | Host | Why |
 |---|---|---|
-| **Worker agents** (web / data / git) | **AWS Lambda** | Per-task, stateless, bursty. Triggered by an **Aiven Kafka event-source mapping** (AWS-managed poller invokes the function with a batch). Each runs the **Anthropic Messages API + remote Aiven MCP connector** — no Agent-SDK/CLI subprocess, so the package stays pure-Python. |
-| **API / FE gateway** | **always-on** (small Fargate / EC2 / Cloud Run) | Holds long-lived WebSockets + a continuous Kafka tail → not Lambda-shaped. (Alt: API Gateway WebSocket API + DynamoDB.) |
-| **central-kg-api** | **AWS Lambda** (Mangum) | Already serverless. Ingestion sidecar + FE bridge; off the agent read path. |
+| **Agent-runner container** (web/git/data + harness + file/session store + FE gateway) | **one container** — ECS Fargate or a plain EC2 | Long-lived Kafka consumer, durable workspace for web builds, warm `mcp-aiven` session, concurrent `asyncio` tasks. One deploy to debug. |
+| **central-kg-api** | **AWS Lambda** (Mangum) | Ingestion sidecar + FE bridge; off the agent read path. |
 | **Frontend** | **Vercel** | Meet overlay + agent-activity feed; talks only to the gateway. |
-| **Listener (A) + Call gateway** | **EC2** | Close to the live call; persistent Recall/Soniox connections. |
-| **Aiven** (Postgres+pgvector, Kafka, OpenSearch) | **Aiven cloud** | Data layer. Reached **only via Aiven MCP** from agents. |
+| **Call/transcription** (LiveKit/Recall + STT) | **EC2** (own container, teammate) | Close to the live call; persistent STT connections. |
+| **Aiven** (Postgres+pgvector, Kafka, OpenSearch) | **Aiven cloud** | Data layer. KG read/write via Aiven MCP (local `mcp-aiven` + static `AIVEN_TOKEN`). |
 
-**The one MCP-vs-direct exception, made explicit:** a Lambda can't run a Kafka consumer loop, so worker *ingest* is
-the AWS-native event-source mapping, not an MCP `aiven_kafka_topic_message_list` call. Every data *operation* an
-agent performs (KG read/write, result/fact emit) still goes through Aiven MCP — which is what the 34% MCP-depth
-criterion measures. **Open risk:** the Aiven *hosted* MCP (`mcp.aiven.live`) documents OAuth-PKCE auth; headless
-Lambda needs a static bearer for the Messages-API connector. If unavailable, self-host `npx mcp-aiven` beside the
-gateway. Verify first — see [AGENT_SYSTEM.md](AGENT_SYSTEM.md) §11.
+**Dispatch is pure Kafka:** the call container produces `agent.tasks.*`; the agent container consumes with a
+long-lived `aiokafka` consumer. **MCP boundary:** KG reads/writes + provisioning go through Aiven MCP (the 34%
+showcase); the Kafka consumer/producer at the service boundary are direct — an LLM round-trip just to publish would
+only add latency. The earlier hosted-MCP OAuth risk is **resolved** by running `mcp-aiven` locally with a static
+token in the container. Full detail: [AGENT_SYSTEM.md](AGENT_SYSTEM.md) §3–§3.5.
 
 ---
 
@@ -398,11 +397,11 @@ reviewer agent and `agent.reasoning` barge-in (stretch).
 
 ## 8. The Agent Suite (workers)
 
-Common shape: each worker consumes its `agent.tasks.<x>` topic, runs **one Anthropic Messages-API session with the
-Aiven MCP connector** per task, and publishes to `agent.results` via MCP. Stateless and horizontally scalable. On our
-chosen hosting these are **AWS Lambda** functions triggered by an Aiven Kafka event-source mapping — see
-[AGENT_SYSTEM.md](AGENT_SYSTEM.md) §2–§4 and §3.6 above. (We deliberately avoid the Agent-SDK CLI-subprocess model on
-Lambda; the listener on EC2 may still use it.)
+Common shape: all workers run inside **one long-lived agent-runner container**. A direct `aiokafka` consumer reads
+`agent.tasks.*`; a shared harness routes each task to a specialist (`web`/`git`/`data`); KG reads/writes go through a
+warm local Aiven MCP session; results/activity are published with a direct Kafka producer (no LLM round-trip on the
+publish — realtime). Tasks run as concurrent `asyncio` coroutines so a slow web build never blocks a fast lookup.
+Full detail incl. the latency rules: [AGENT_SYSTEM.md](AGENT_SYSTEM.md) §2–§4 and §3.6 above.
 
 ### 8.1 Agent B — Web Agent → Vercel
 - **Intent vocab:** `build_website`, `update_website`.

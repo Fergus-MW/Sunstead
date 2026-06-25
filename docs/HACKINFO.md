@@ -86,12 +86,12 @@ immediately after announcement. → Have a tight 4-min pitch + working demo read
 
 ## Strategy: how Sunstead maps to the rubric
 
-1. **Make MCP the spine, not a side-call (34%).** Per [PLAN.md §3.5]: agent→data goes through Aiven MCP
-   (`aiven_pg_read`/`aiven_pg_write`, `aiven_kafka_topic_message_produce`; OpenSearch tools unverified). Our
-   `agent-system/shared/kafka.py` + `kg_client.py` direct clients are the *pre-realignment* approach — the agent path
-   moves to MCP via the Anthropic Messages-API remote MCP connector. The one unavoidable direct hop is **inbound**:
-   our Lambda workers are triggered by an AWS Kafka event-source mapping (a Lambda can't run a consumer loop), and the
-   transcript firehose stays a direct client on the teammate's EC2. Every agent *data operation* is MCP.
+1. **Make MCP the spine, not a side-call (34%).** Per [PLAN.md §3.5]: agent KG reads/writes go through Aiven MCP
+   (`aiven_pg_read`/`aiven_pg_write`; OpenSearch tools unverified) — run as a **warm local `mcp-aiven` session** in
+   our agent-runner container with a static `AIVEN_TOKEN` (so there's no auth dance and no per-call overhead). The
+   old `kg_client.py` HTTP path is dropped. The only direct (non-MCP) clients are the **Kafka consumer/producer** at
+   our service boundary — dispatch is pure Kafka, and routing a publish through an LLM round-trip would only add
+   latency (realtime is a hard requirement). Every agent *data operation* is MCP.
 2. **Show autonomy on camera (33%).** Provision the *next* Aiven service (Kafka, OpenSearch) via MCP tool calls
    during the build and capture it; note the tool calls in commit messages. Judges look for visible evidence that
    backend wiring was abstracted away.
