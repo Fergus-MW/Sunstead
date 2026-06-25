@@ -25,7 +25,7 @@ through Aiven MCP (§7).
  │ LiveKit/Recall + Soniox STT│   Aiven      │  long-lived Kafka consumer (agent.tasks.*)  │
  │ "ack fast, defer long"     │   Kafka      │  shared HARNESS: validate→claim→fetch→plan  │
  │  └ produces ───────────────┼────────────▶ │     →act→verify→persist→emit                │
- │     meeting.transcript     │              │  specialists: web · git · data · meeting-ops│
+ │     meeting.transcript     │              │  specialists: git·web·data·ops·research·echo│
  │     agent.tasks.*          │              │  FILE/SESSION store: sessions/<id>/...       │
  │  └ consumes ◀──────────────┼──────────────┤  Aiven MCP (local mcp-aiven + AIVEN_TOKEN): │
  │     agent.results/activity │              │     aiven_pg_read/write · provision         │
@@ -37,7 +37,7 @@ through Aiven MCP (§7).
 
 | | Owned here | Where | Integration seam |
 |---|---|---|---|
-| **web / git / data agents** (+ meeting-ops, kg-writer roadmap) | ✅ | in the **agent-runner container** | consume `agent.tasks.*`, emit `agent.results`/`agent.activity` |
+| **git / web / data / meeting-ops / research agents** (+ `echo`; kg-writer roadmap) | ✅ | in the **agent-runner container** | consume `agent.tasks.*`, emit `agent.results`/`agent.activity`/`agent.trace` |
 | **shared harness + file/session store** | ✅ | same container | — |
 | **FE gateway** (thin bridge) | ✅ | same container | REST + WS to the Vercel FE |
 | **Call/transcription** (LiveKit/Recall + STT) | ❌ teammate | its own container | produces `meeting.transcript` + `agent.tasks.*` |
@@ -67,8 +67,8 @@ Inside one process:
 - **Kafka consumer** (`shared/kafka.py`, `aiokafka`) — one consumer group per agent topic (or one consumer
   subscribed to all three); long-lived, real offset commits.
 - **Shared harness** (§4) — every task runs the same lifecycle; specialists only implement `run()`.
-- **Specialists** — `web`, `git`, `data` (core) + `meeting-ops`, `kg-writer` (roadmap), each a module, *not* a
-  separate process.
+- **Specialists** — `git`, `web`, `data`, `meeting-ops`, `research` (all real) + `echo`; `kg-writer` roadmap. Each
+  is a module, *not* a separate process.
 - **File/session store** (§5) — a folder tree on a durable volume; the web agent's persistent workspace lives here.
 - **Aiven MCP** (§3) — local `mcp-aiven` for all KG/provisioning ops.
 - **FE gateway** (§8) — a small FastAPI in the same image: REST commands → Kafka, and a Kafka→WS tail for the FE.
@@ -200,11 +200,17 @@ Topics (created once — Aiven auto-create is OFF; can be an on-camera control-p
 
 | Topic | Key | Producer | Consumer |
 |---|---|---|---|
-| `meeting.transcript` | `meeting_id` | call container *(teammate)* | gateway (and teammate's listener) |
-| `agent.tasks.web` / `.data` / `.git` | `task_id` | call/listener *(teammate)* | **our container** |
-| `agent.results` | `task_id` | **our container** | listener, gateway |
-| `agent.activity` | `task_id` | **our container** | gateway (FE feed) |
-| `kg.updates` | `node_key` | **our container**, listener | `central-kg-api` consumer |
+| `meeting.transcript` | `meeting_id` | avatar `/transcript` · `say.py` · `mock_meeting` (via gateway) | **planner**, gateway Hub |
+| `agent.tasks.{web,data,git,ops,research,dev}` | `task_id` | **planner** (transcript→tasks) · gateway `POST /tasks` (ask box / avatar `delegate()`) | **runner** (our container) |
+| `agent.results` | `task_id` | **runner** (+ async grounding verdict) | gateway (FE feed) |
+| `agent.activity` | `task_id` | **runner** | gateway (FE feed) |
+| `agent.trace` | `task_id` | **runner** (streamed thinking/output deltas) | gateway (FE reasoning panel) |
+| `agent.control` | `task_id` | gateway `POST /control` (FE stop button) | **runner** (broadcast → cancel) |
+| `kg.updates` | `node_key` | **runner** | `central-kg-api` consumer *(roadmap)* |
+
+> The original "call/transcription is a teammate's separate container that produces `agent.tasks.*`" framing (above
+> in §1–§2) is **superseded**: the avatar landed on `main`, emits only `meeting.transcript`, and the **planner**
+> (in our container) is the single delegation brain that produces the task topics. See [DESIGN.md](DESIGN.md) §6.
 
 Envelope (every message) — single source of truth is `shared/contracts.py` (pydantic), transport-agnostic:
 
@@ -260,24 +266,37 @@ for agents: `GET /query?q=`, `/subgraph`, `/entity/{id}`, `/timeline`; `POST /in
 
 ## 8. The agent suite + gateway
 
-Specialists (each a module the harness calls `run(task, ctx)`). Build **git first** (simplest, pure read), then
-**web** (best demo), then **data**; **meeting-ops** + **kg-writer** are roadmap, **reviewer** a stretch.
+Specialists (each a module the harness calls `run(task, ctx)`). **Five are real** (`git`, `web`, `data`,
+`meeting-ops`, `research`) plus the no-creds `echo`; `kg-writer` is roadmap, `reviewer` shipped as the **grounding
+verifier** (§4, the harness pre-emit gate).
 
 - **git / KG-agent** — `read_git`, `blame`, `who_changed`, `recent_changes`, plus **`ask`** (general KG question
   over any node/edge type). A config-driven, *general* knowledge-graph agent (answers code **and** knowledge
-  questions: decisions, meetings, people, policies) via `aiven_pg_read`. **First milestone — §10.**
-- **web-agent** — `build_website`, `update_website`. **Persistent workspace** (§5); codegen → build/smoke-check →
-  `vercel_deploy` (Vercel API / Build Output API) → store deployment metadata. Returns a live URL.
-- **data-agent** — `analyze`, `summarize_metrics`, `query_data`. pandas/matplotlib; pulls rows via `aiven_pg_read`;
-  returns answer + chart artifact.
-- **meeting-ops** *(roadmap)* — decisions / action-items / recap → structured task list. **kg-writer** *(roadmap)*
-  — background transcript→graph extraction. **reviewer** *(stretch)* — gate outputs before they're spoken/deployed.
+  questions: decisions, meetings, people, policies) via `aiven_pg_read`. Now has a **canned fast path** (templated,
+  injection-guarded SQL + a 60s cache + one streamed Haiku phrasing turn) for the known intents, and the agentic LLM
+  path for `ask`. Returns `_verify` evidence (the fetched rows) for the grounding gate.
+- **web-agent** — `build_website`, `update_website`. **Persistent revisioned workspace** (§5) keyed by
+  `workspace_id`; Claude streams a one-file site → written to `SITES_DIR/<task>/` → served URL artifact. (Vercel
+  deploy is the documented swap-in; today it's local-serve.)
+- **data-agent** — `analyze`, `summarize_metrics`, `query_data`. A **strict-tool** turn plans SQL + a chart spec;
+  rows pulled via `aiven_pg_read`; renders a matplotlib PNG **off-thread** → answer + chart artifact. Returns
+  `_verify` evidence.
+- **meeting-ops** ✅ *(real)* — `recap` / `action_items` / `decisions`. A strict-tool extraction over a transcript
+  window (with evidence quotes + speaker attribution) that **writes outcomes back into the KG** via `aiven_pg_write`
+  — idempotent slug-keyed `action_item` / `decision` nodes + `in_meeting` / `owns` edges. The flywheel that grows
+  the graph from the meeting itself.
+- **research** ✅ *(real)* — `research`. Claude **server-side `web_search` / `web_fetch`** (adaptive thinking,
+  bounded turns) → answer + sources as URL artifacts; streams thinking/text to `agent.trace`.
+- **kg-writer** *(roadmap)* — background transcript→graph extraction (meeting-ops now covers the outcome-write
+  slice). **reviewer** — shipped as the **grounding verifier** in the harness (gate, not a separate agent).
 
 **Gateway** (same container) — the Vercel FE's one clean, auth'd connection: `POST` commands → produce to Kafka;
 `WS /stream?meeting_id=` tails `meeting.transcript` + `agent.results` + `agent.activity` → browser. FE never touches
 Kafka or MCP creds.
 
-Models: Opus 4.8 for hard reasoning, Sonnet for codegen, Haiku for simple retrieval.
+Models (as deployed): **Opus 4.8** for the hard structured extractions (meeting-ops) and the research web-search
+loop; **Haiku 4.5** for the cheap/fast turns (data-agent's strict-tool plan, the git-agent canned-path phrasing).
+Strict tool use is GA on both, so no beta header is needed.
 
 ---
 

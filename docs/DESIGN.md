@@ -24,7 +24,7 @@ speaks its native, latency-appropriate idiom, joined by one explicit seam.
  ┌──────────────────────────────┐                   ┌───────────────────────────────────────────┐
  │ avatar-agent (Ferg)          │   delegate(...)   │ agent-runner container (ours)              │
  │ Recall + LiveKit + Anam      │ ───── seam ─────▶ │ Kafka consumer → harness → specialists     │
- │ STT→LLM(Sonnet)→TTS          │   agent.tasks.*   │ web · git · data  (Aiven MCP for all data) │
+ │ STT→LLM(Sonnet)→TTS          │   agent.tasks.*   │ git·web·data·meeting-ops·research (via MCP) │
  │ fast KG reads via HTTP ──────┼───┐               │ emits agent.results / agent.activity ──────┼──┐
  └──────────────────────────────┘   │ HTTP          └───────────────────────────────────────────┘  │
             ▲ speaks / shows         ▼                              │ aiven_pg_read/write              │ Kafka
@@ -96,15 +96,21 @@ runs (locally is fine).
 The remaining risk is **integration, not capability.** Most of the original "three wires and a merge" is done.
 
 **Done (this build):** avatar merged to `main`; Aiven Kafka provisioned via MCP (`kafka-254bd14f`, 9 topics);
-web-agent real (site → served URL); delegation seam wired *twice* — the avatar's `delegate()` (§3, option a) **and**
-the `planner` (tails `meeting.transcript` → `agent.tasks.*`); gateway built (`POST /tasks` + `WS /stream`, with a
+the **agent suite grew to six** — `git`/`web`/`data` plus **`meeting-ops`** (transcript → recap/action-items/decisions
+written **back into the KG** via `aiven_pg_write`, idempotent) and **`research`** (Claude server-side web search/fetch),
+with `echo` the no-creds smoke; web-agent real (site → served URL, persistent workspace) and the git/KG-agent gained a
+**canned fast path** (templated SQL + cache, no agentic LLM); delegation decided & wired — the **planner is the single
+brain** (avatar emits `meeting.transcript`; `delegate()` opt-in); gateway built (`POST /tasks` + `WS /stream`, with a
 replay ring buffer); Soniox STT + Anam avatar wired; FE `/api/join` dispatches + the dashboard scopes by `meeting_id`;
 a `mock_meeting` harness drives the whole pipe locally with no Recall/LiveKit; **live reasoning streaming**
 (`agent.trace`) — agents stream adaptive-thinking + output deltas → gateway → a per-task FE reasoning panel
-(seq-ordered, replay-idempotent). **Oversight, phase one (§7):** the **grounding verifier** (a pre-emit gate that
-checks the KG agent's answer against the rows it retrieved, annotate-only / fail-open, badged on the FE), the
-**control channel** (`agent.control` → the runner cancels a running task; FE "stop" button), and a **mission-control
-dashboard** (a live digest bar — active/stuck/grounded/flagged — over a tiled agent board with verdict badges).
+(seq-ordered, replay-idempotent). **Oversight, phase one (§7) — verified live:** the **grounding verifier**
+(checks the KG agent's answer against the rows it retrieved, annotate-only / fail-open, badged on the FE) running
+**emit-then-update off the critical path** (answer instant; `verdict` event follows ~1.5 s later — grounded *and*
+flagged branches tested); the **control channel** (`agent.control` → the runner cancels a running task; FE "stop"
+button; broadcast to the FE so any stop shows a "cancelling" state) — cancel verified on both the stream and tool-loop
+paths, and a clean no-op when the task already finished; and a **mission-control dashboard** (a live digest bar —
+active/stuck/grounded/flagged — over a tiled agent board with verdict badges).
 
 **Left:**
 1. **Point runner/gateway at Aiven Kafka** (bootstrap + SASL creds) — flips local→cloud by env only.
@@ -126,6 +132,19 @@ Both trajectories — **win the live demo** and **win the written Anthropic subm
 - **Spoken vs FE-only results** — FE-only for the demo; spoken is a later notify edge. §3.
 - **Doc consolidation** — fold PLAN/AGENT_SYSTEM/HACKINFO detail into DESIGN/OVERVIEW as we go; keep them as deep
   references meanwhile.
+- **KG data model — one graph, two layers — DECIDED.** Keep a **single** property graph (code + meeting/knowledge
+  share `nodes`/`edges`; the cross-domain joins at shared `person`/`topic` are the whole point — don't split into
+  separate graphs). But split by **identity semantics**: *entities* (stable, name-identified — `person`,
+  `code_module`, `meeting`, `topic`, `website`) stay `nodes` under the `(type, lower(name))` natural key, where
+  merge-on-conflict is correct; *episodes* (occurrence-identified — `utterance`, `action_item`, `decision`,
+  `research_finding`, oversight verdicts) must **not** dedupe by name — they go in the `events` table, or, when they
+  must be graph-traversable, in `nodes` with a non-colliding scoped name (`{meeting_id}::{slug}`). This resolved a
+  live bug: meeting-ops had written `action_item`/`decision` nodes under `(type, lower(name))`, so the same text
+  across two meetings silently merged (data loss) — now keyed `{meeting_id}::{slug}` with the text in
+  `properties.title`. Storage rule: cross-type filter keys → columns (promote `meeting_id` via a
+  `GENERATED` column + index); type-specific attributes → `properties` JSONB; a different *kind* of record → its own
+  table (`events`/`sources`). Full reasoning: `reviewmd/2026-06-25T04-26Z-system-design-orchestration-and-graph-model.md`.
+  Relates to §3 (KG access) and §7 (KG as the cross-agent substrate).
 - **Oversight = gate + flag, not steer — DIRECTION SET.** Worker tasks are seconds long, so a coding-harness
   *steering* overseer is the wrong tool; the value here is a **grounding gate** (the cost of a bad step is a false
   claim *spoken in a live meeting*) and **fleet flags**. Three guards by altitude, each just another Kafka consumer;
@@ -150,7 +169,7 @@ nothing enforces it. That's the gap.
 | Guard | Watches | Question | Cost | Replaces |
 |---|---|---|---|---|
 | **Tripwire** | one agent's *reasoning* stream | "is the thinking going off the rails / fabricating?" | cheap — pattern-match + occasional small-model check | the human reading a thinking stream |
-| **Verifier** | one agent's *output* before emit | "does this answer follow from the evidence (rows/tools)?" | one LLM round-trip (fast model on the speech path) | the human sanity-checking an answer |
+| **Verifier** | one agent's *output*, just after emit | "does this answer follow from the evidence (rows/tools)?" | one LLM round-trip (fast model, **off the critical path**) | the human sanity-checking an answer |
 | **Conductor** | *all* tasks in a meeting | "is one stuck? are two in conflict? a duplicate? mis-dispatched?" | mostly deterministic + LLM for judgment calls | the human watching the dashboard |
 
 Tripwire = process guard (the *single agent in reasoning* case); verifier = product guard; conductor = fleet guard
@@ -161,8 +180,10 @@ model for grounding and conflict judgments.
 
 An overseer is **just another Kafka consumer/producer**, like the gateway. The conductor tails `agent.activity` +
 `agent.results` + `agent.trace`, holds session state, and emits `agent.oversight` events (verdicts, flags) — the FE
-renders them; the avatar can *speak* them. The verifier slots into the harness **pre-emit boundary** (between an agent
-returning and `_emit_result`) — one insertion point, all agents covered.
+renders them; the avatar can *speak* them. The verifier slots into the harness right after emit — one insertion point,
+all agents covered. **Emit-then-update, not a blocking gate:** the answer is emitted immediately, the check runs off
+the critical path, and the verdict follows as a separate `verdict` event (~1.5 s later, measured) so verification
+**never delays the answer** — the §2 tempo rule (no slow verifier in front of the spoken/displayed result).
 
 > **Oversight is also content.** A conductor flag ("two agents disagree on who owns auth") isn't just a dashboard
 > badge — the avatar can voice it: *"heads up, I'm getting conflicting answers — let me reconcile."* That turns

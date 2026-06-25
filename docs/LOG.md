@@ -5,6 +5,142 @@
 
 ---
 
+## 2026-06-25 — Reconciled all docs to the six-agent reality (the suite grew without a paper trail)
+
+**What:** a full documentation pass aligning every README + the doc system to the current code. The trigger: the agent
+suite had **grown from three real agents to five** — `meeting-ops` and `research` (and the real `data-chart`) landed in
+commit `78370e3`, which **touched no docs** — so OVERVIEW/AGENT_SYSTEM still listed `git/web/data` and marked
+meeting-ops "roadmap". Captured the now-true state across the tree: (1) **six agents, five real** —
+git·web·data·meeting-ops·research + echo, with their intents and topics (`agent.tasks.{ops,research}` added; the bus is
+now **13 topics**). (2) **meeting-ops writes back into the KG** (`recap`/`action_items`/`decisions` → idempotent
+`{meeting_id}::{slug}`-keyed `action_item`/`decision` nodes + `in_meeting`/`owns` edges via `aiven_pg_write`) — the
+flywheel. (3) **research** = Claude server-side `web_search`/`web_fetch`. (4) the **git/KG-agent canned fast path**
+(templated, injection-guarded SQL + 60s cache + one Haiku phrasing turn) beside the agentic `ask` path. (5)
+**central-kg-api**: extraction centralized in one `graph.persist_extracted_graph()`, the extraction prompt's vocab
+generated from `models.py`, seed edges mapped to the canonical `EdgeType` vocabulary (precise relation kept in
+`properties.graphify_relation`), and the runtime **`GET /search` (OpenSearch BM25)** documented as live (it was still
+filed as a "gap"); added the missing `/search`, `GET /node`, `/overview`, `/source/{id}` to the API tables. (6) **FE
+mission-control** surfaced in the meet-joiner README (digest bar, verdict badges, streamed reasoning, stop buttons, the
+new zero-dep `Markdown` renderer). (7) fleshed out the near-empty **root README** into a real entrypoint. Also confirmed
+**`env-bundle/` + `env-bundle.zip` are gitignored** and were never committed (operator flagged it; already handled in
+`31ff4f8`).
+
+**Why:** the operator asked for a full pass so the READMEs + OVERVIEW reflect *current* reality and major changes live
+in LOG, with historical progression preserved. The binding problem was a documentation/code gap, not a code gap:
+disciplined as the LOG has been, one feature-commit slipped through without an entry, and the OVERVIEW's "Agent suite"
+pillar undersold the system — it's the showpiece, and understating it weakens the 33%/34% story. A doc that lies about
+the HEAD is worse than no doc.
+
+**Analysis / consequences:** OVERVIEW, DESIGN (roadmap "done" list + diagram), and the deep references now agree on the
+roster, topics, and oversight state. Left deliberately as historical framing: AGENT_SYSTEM §1–§2's "call container is a
+teammate's separate box that produces `agent.tasks.*`" — superseded by the avatar-on-`main` + planner-brain model, now
+flagged inline (§6) and authoritative in DESIGN rather than rewritten. Done concurrently with active code work (a
+parallel session was promoting `meeting_id` to an indexed column, adding a planner `effort` tier, and tuning agents), so
+several agent/central-kg refinements remain **uncommitted in the working tree** — the docs now describe the intended
+state they bring. Not changed: any code or infra; the `kg.updates` consumer is still the open loop that would propagate
+meeting-ops' writes to subscribers.
+
+**Touches:** `README.md`, `docs/{OVERVIEW,DESIGN,AGENT_SYSTEM,CENTRAL-KG-API,LOG}.md`, `agent-system/README.md`,
+`central-kg-api/{README.md,seed/README.md}`, `meet-joiner/README.md`. (Documentation only — no code or infra changed.)
+
+— Claude (Opus 4.8), signed off
+
+---
+
+## 2026-06-25 — Added an `effort` tier so the planner scales depth to user intent (quick vs deep)
+
+**What:** the planner now picks an `effort` (`quick` / `standard` / `deep`) per task from the speaker's wording and
+stamps it on `TaskCreatePayload` (new optional field, default `standard` — backward-compatible, so the gateway
+ask-box and replayed messages keep working). A new `shared/effort.py` maps each tier to concrete budgets
+(web-search/fetch counts, turn limit, thinking effort), and `config.py` gained a `model_mid` (Sonnet 4.6) so model
+choice can be a function of effort, not a hardcode. The research agent is the first consumer: it now runs Sonnet at
+2 searches / low thinking / 2 turns for `quick`, and escalates to Opus at 8 searches / high thinking / 6 turns for
+`deep` (web tools require Sonnet/Opus, so quick/standard stay on the mid tier).
+
+**Why:** routing was depth-blind — "just check the price of X" and "do a thorough deep-dive on X" both ran the
+research agent at the identical max (Opus, 8 searches, high effort, 6 turns). That burns tokens/latency on cheap asks
+and offers no way to spend *more* when the user signals they want depth. `effort` makes the frugal path the default
+and escalation opt-in by user intent — the "minimize wasted tokens unless the user asks otherwise" goal (reviewmd
+2026-06-25T04-26Z, Phase 1; DESIGN §6).
+
+**Analysis / consequences:** contract change to `TaskCreatePayload` (the §3 "change = PR + LOG entry" rule); purely
+additive, all existing producers default to `standard`. **Behavior note:** gateway-dispatched research tasks (no
+effort set) now default to Sonnet, not Opus — cheaper/faster and still web-tool-capable; pass `effort: "deep"` for
+Opus. `shared/effort.py` holds the one budget table; web/data/git agents are one-liners to wire to it next (their
+`quick` path is templated-SQL-vs-LLM, not search count). Unit-verified (default/explicit effort, policy table,
+unknown→standard fallback); not yet run end-to-end live (Aiven token expired).
+
+**Touches:** `agent-system/shared/src/shared/{contracts,config,effort}.py`,
+`agent-system/agent-runner/src/agent_runner/{planner.py,agents/research.py}`, `docs/LOG.md`, `reviewmd/…-graph-model.md`.
+
+— Claude (Opus 4.8), signed off
+
+## 2026-06-25 — Promoted meeting_id to an indexed generated column (the episodic-layer support)
+
+**What:** added `meeting_id` to `nodes` as a `GENERATED ALWAYS AS (properties->>'meeting_id') STORED` column + a
+btree index (`nodes_meeting_idx`), via an idempotent `ALTER … ADD COLUMN IF NOT EXISTS` in `schema.sql`. This is the
+indexed support for the "one graph, two layers" decision (DESIGN §6): the entity/episodic split means most
+*episodic* reads are meeting-scoped, and they were filtering on `properties->>'meeting_id'` with no index —
+a sequential scan over 7 k+ nodes per read.
+
+**Why:** the orchestrator's per-meeting grounding/memory (reviewmd 2026-06-25T04-26Z, Phase 1/2) reads "what does
+this meeting know" on every grounded task; that has to be an index hit, not a scan. The generated column promotes the
+hot filter key out of JSONB with **zero write-path changes** — meeting-ops (and any future writer) keeps putting
+`meeting_id` in `properties`; Postgres derives and indexes the column. JSONB stays the home for the type-specific
+long tail; only the cross-type filter key is promoted.
+
+**Note — the episode-key half landed in parallel.** The cross-meeting *merge bug* this column was paired with (the
+`(type, lower(name))` key collapsing identical action-item/decision wording across meetings into one node) was fixed
+independently in `meeting.py`: outcomes are now keyed `{meeting_id}::{slug(title)}` with the display text in
+`properties.title`, and the rewrite also added `meeting`/`person` nodes and `in_meeting`/`owns` edges (Phase 3
+overlap). So the two-layer decision is now enforced on **both** the write side (scoped names) and the read side (this
+index). Only `meeting_id` is currently populated for action_item/decision/meeting nodes; `person` nodes have no
+meeting scope (correct — a person isn't meeting-bound), so their generated `meeting_id` is NULL.
+
+**Analysis / consequences:** idempotent and safe to re-run; applies on a fresh DB via the compose initdb mount and on
+the live Aiven DB via `psql -f schema.sql`. Not yet verified live — the Aiven token is expired (03-23Z snapshot);
+re-apply `schema.sql` and confirm `EXPLAIN` uses `nodes_meeting_idx` once it's refreshed. `ivfflat`/embeddings remain
+the separate open item (reviewmd §B.5).
+
+**Touches:** `central-kg-api/schema.sql`, `docs/{DESIGN,LOG}.md`.
+
+— Claude (Opus 4.8), signed off
+
+## 2026-06-25 — Took the verifier off the critical path (emit-then-update); hardened + tested oversight
+
+**What:** moved the grounding verifier from a **blocking pre-emit gate** to **emit-then-update**: the harness emits the
+answer immediately, then `schedule_verify()` runs the check on a detached background task and publishes the verdict as
+a new `verdict` event (`VerdictPayload`) on `agent.results`; the FE applies it to the task by id. Also: the gateway
+now **broadcasts `agent.control`** to the FE (so any stop — not just the local button — shows a "cancelling" state),
+and fixed two FE flaws found by adversarial testing — a long-streaming task was falsely flagged "stalled" (trace
+deltas didn't count as liveness; now they do) and the verdict badge said "rows" when it counts evidence items ("refs").
+
+**Why:** the verifier added ~1.5 s on the path between an agent finishing and the answer being emitted — fine for a
+dashboard, but a direct violation of the §2 tempo rule the moment TTS is wired (no slow verifier in front of speech).
+Emit-then-update decouples answer latency from check latency entirely. The control-broadcast makes the linter's new
+"cancelling" FE branch actually fire and lets a stop issued by anyone (avatar, conductor, another browser) reflect on
+every dashboard.
+
+**Analysis / consequences:** the result now always emits with no verdict; the verdict follows as its own event (same
+`agent.results` topic, keyed by `task_id` → same partition → ordered after the result; FE dedupes by envelope id, so
+replay is idempotent). Verified live end-to-end: answer emitted with `verdict=None`, `verdict` event arrived **1563 ms
+later** (decoupled); verifier correct on grounded, fully-fabricated, **partially**-fabricated, and honest-no-results
+claims; 3 concurrent KG tasks each got correctly-attributed evidence (the per-task `_RecordingSession` proxy is
+concurrency-safe); cancel works on both the stream and tool-loop paths and no-ops cleanly post-completion; the control
+frame reaches the FE. **Gotcha worth recording:** Docker BuildKit served a **stale `COPY shared` cache layer** on
+Windows — `docker compose build` reported success but shipped old source (the running image's `harness.py` had no
+`schedule_verify`); `--no-cache` was required to force fresh source. Verify a container actually has new code
+(`docker compose exec … python -c "…"`) before trusting a rebuild. Open: extend the gate to the data + meeting-ops
+agents; promote the conductor's judgement (stuck/conflict → auto-cancel) from the FE digest into a backend service;
+a `redirect` control verb.
+
+**Touches:** `agent-system/shared/src/shared/{contracts,harness}.py`, `agent-system/agent-runner/src/agent_runner/gateway.py`,
+`meet-joiner/src/app/dashboard/{page.tsx,types.ts,useStream.ts}`, `docs/{DESIGN,LOG}.md`.
+
+— Claude (Opus 4.8), signed off
+
+---
+
 ## 2026-06-25 — Oversight phase one: grounding verifier, control channel, mission-control UI
 
 **What:** built the first three pieces of the oversight design (DESIGN §7). (1) **Grounding verifier** — a pre-emit

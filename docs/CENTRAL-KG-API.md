@@ -7,9 +7,11 @@
 Status as of this doc: **live against Aiven and seeded**. Schema applied, async DB
 round-trip verified end-to-end, and the **repo-seed CLI is implemented** (`seed/`,
 tree-sitter + git → ~6,183 nodes / 26,179 edges from `anthropic-sdk-python`) with a
-**seed-time OpenSearch mirror** (`seed/mirror_opensearch.py`). Still open: a
-**runtime** OpenSearch quicksearch endpoint (the app queries pgvector + trigram only)
-and the `kg.updates` Kafka consumer — see [§7 Gaps vs PLAN.md](#7-gaps-vs-planmd).
+**seed-time OpenSearch mirror** (`seed/mirror_opensearch.py`). The **runtime OpenSearch
+BM25 endpoint is now wired** — `GET /search` (BM25 → ids → the recursive-CTE
+neighborhood, with a trigram fallback when OpenSearch is unreachable). Still open: the
+`kg.updates` Kafka consumer (so delegated work flows back into the graph) — see
+[§7 Gaps vs PLAN.md](#7-gaps-vs-planmd).
 
 ---
 
@@ -93,26 +95,30 @@ migration.
 | POST   | `/ingest`               | Add a raw source (transcript / doc / code chunk); optionally run extraction |
 | POST   | `/extract`              | Run Claude extraction over text or an existing `source_id`           |
 | POST   | `/node`                 | Upsert a node by `(type, name)`; optionally embed                    |
+| GET    | `/node?type=&name=`     | Find nodes by `type` / `name` filter (no UUID needed)                |
 | POST   | `/link`                 | Upsert an edge — endpoints by id **or** by `(type, name)` ref        |
-| GET    | `/query?q=…`            | Hybrid search → ranked nodes + focused subgraph                      |
-| GET    | `/entity/{id}?hops=N`   | A node plus its N-hop neighborhood                                   |
-| GET    | `/subgraph?center=…&hops=N` *or* `?q=…` | BFS subgraph around ids, or seeded by a search query |
+| GET    | `/query?q=…`            | Hybrid search (pgvector + trigram) → ranked nodes + focused subgraph |
+| GET    | `/search?q=…`           | **OpenSearch BM25** → ids → subgraph (trigram fallback if OS is down) |
+| GET    | `/entity/{id}?hops=N`   | A node plus its N-hop neighborhood (`hops` 0–4, `limit`)             |
+| GET    | `/overview`             | No-query landing view: busiest hubs + neighborhoods (FE `/graph` mount) |
+| GET    | `/subgraph?center=…&hops=N` *or* `?q=…` | BFS subgraph around ids, or seeded by a search query (`hops` 0–4, `node_limit`) |
 | POST   | `/update`               | Append an `event`; bumps the related node's `updated_at`             |
 | GET    | `/timeline`             | Time-ordered events, filterable by `node_id` / `kind` / `since`      |
 | GET    | `/source/{id}`          | Fetch the raw source row                                             |
 | GET    | `/health`               | Liveness                                                             |
 | GET    | `/docs`                 | OpenAPI / Swagger UI                                                 |
 
-### Retrieval (`/query` and `/subgraph?q=`)
+### Retrieval — three read paths
 
-```
-score = 0.7 * (1 - cosine(query_embedding, node.embedding))
-      + 0.3 * trigram_similarity(node.name, query)
-```
-
-If `OPENAI_API_KEY` isn't set, the embedding column stays NULL and the API
-falls back to trigram-only — graceful degrade, no crash. Hop-bounded BFS is a
-recursive CTE in `app/graph.py:subgraph_bfs`.
+- **`/query`** — hybrid pgvector + trigram. `score = 0.7 * (1 - cosine(query_embedding, node.embedding))
+  + 0.3 * trigram_similarity(node.name, query)`. If `OPENAI_API_KEY` isn't set the embedding column stays NULL and it
+  **falls back to trigram-only** — graceful degrade, no crash.
+- **`/search`** — OpenSearch BM25 (`name^3, source_file^2, label, text`) → node ids → the same neighborhood; a
+  strict upgrade for natural-language recall. If `OPENSEARCH_URL` is unset or OpenSearch is unreachable it **falls
+  back to the trigram `/query` path**, so it's never worse. (Note: the avatar/FE product callers still default to
+  `/query`; pointing them at `/search` is a one-line swap.)
+- Both seed a hop-bounded BFS — a recursive CTE in `app/graph.py:subgraph_bfs`; `/overview` seeds it from the
+  highest-degree hub nodes (recency fallback on an edgeless graph).
 
 ### Idempotency
 
@@ -140,12 +146,13 @@ central-kg-api/
     ├── config.py           # pydantic-settings
     ├── db.py               # async engine + session
     ├── models.py           # pydantic schemas + node/edge type literals
-    ├── extract.py          # Claude JSON-mode entity extraction
+    ├── extract.py          # Claude JSON-mode entity extraction (prompt vocab from models.py)
     ├── embeddings.py       # OpenAI embeddings (no-op without key)
-    ├── graph.py            # upsert_node / upsert_edge / subgraph_bfs / hybrid_search
+    ├── search.py           # OpenSearch BM25 client (bm25_node_ids; backs GET /search)
+    ├── graph.py            # upsert_node/edge · subgraph_bfs · hybrid_search · overview_centers · persist_extracted_graph
     └── routers/
         ├── ingest.py    extract.py    link.py
-        ├── query.py     entity.py     subgraph.py
+        ├── query.py     search.py     entity.py     subgraph.py
         └── update.py    timeline.py
 ```
 
@@ -214,8 +221,8 @@ still needs doing or deciding.
 | PLAN.md says                                | This service today                            | Status      |
 |---------------------------------------------|------------------------------------------------|-------------|
 | Schema `nodes(kind, key, props, embedding)`, `edges(src_id, dst_id, rel, props)` with BIGINT ids and HNSW index | `nodes(type, name, properties, embedding)`, `edges(source_node_id, target_node_id, type, properties)` with UUID ids and IVFFLAT index | **Naming divergence** — see decision below |
-| Endpoints: `POST /query`, `/semantic_search`, `/quicksearch`, `/upsert`, `/seed` | `POST /ingest /extract /node /link /update`; `GET /query /entity/:id /subgraph /timeline` | **Surface divergence** |
-| OpenSearch mirror for quicksearch          | Seed-time mirror **done** (`seed/mirror_opensearch.py`); runtime `/quicksearch` endpoint not wired — app uses `pg_trgm` + pgvector | **Partial** |
+| Endpoints: `POST /query`, `/semantic_search`, `/quicksearch`, `/upsert`, `/seed` | `POST /ingest /extract /node /link /update`; `GET /query /search /overview /entity/:id /node /subgraph /timeline /source/:id` | **Surface divergence** (`/search` is the `/quicksearch` equivalent) |
+| OpenSearch mirror for quicksearch          | Seed-time mirror **done** (`seed/mirror_opensearch.py`) **and** the runtime `GET /search` endpoint is now wired (BM25 → CTE, trigram fallback) | **Done** |
 | `seed` CLI: tree-sitter + git → nodes/edges | **Done** — `seed/` (tree-sitter + git, `graphify_adapter.py`); ~6,183 nodes / 26,179 edges seeded live | **Done** |
 | `kg.updates` Kafka consumer → async writes | Not implemented                                | **Missing** |
 | HNSW vector index                          | IVFFLAT (Postgres 17 + pgvector supports both) | **Minor**   |
@@ -243,9 +250,10 @@ still needs doing or deciding.
 
 1. ~~**`seed` CLI**~~ ✅ **done** — tree-sitter + `git log` over a target repo, bulk
    upsert into `nodes`/`edges` (`central-kg-api/seed/`, `graphify_adapter.py`).
-2. **OpenSearch — runtime path** — the seed-time mirror exists
-   (`seed/mirror_opensearch.py`); still to do is the live `GET /quicksearch?q=…`
-   endpoint (the MCP exposes no OpenSearch search tool, so query the OS HTTP endpoint directly — see `infra/README.md`).
+2. ~~**OpenSearch — runtime path**~~ ✅ **done** — `GET /search?q=…` queries the
+   OpenSearch HTTP endpoint directly (`app/search.py:bm25_node_ids`) → ids → the
+   recursive-CTE neighborhood, with a trigram fallback. Optional follow-up: blended
+   BM25 ⊕ trigram scoring, and pointing the avatar/FE callers at `/search`.
 3. **`kg.updates` Kafka consumer** — listen on the Aiven Kafka bus; the
    Listener agent publishes `(node|edge) upsert` events and we apply them
    async so the live write path never blocks the call.

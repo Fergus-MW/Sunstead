@@ -1,8 +1,9 @@
 # Sunstead — Overview (the HEAD)
 
-> _Agent-facing orientation. Current state of the repo, not the aspiration. Last synced 2026-06-25 (avatar merged +
-> delegating, Aiven Kafka provisioned, web-agent real, planner + `mock_meeting` shipped). For where we're going, see
-> [DESIGN.md](DESIGN.md); for why things are the way they are, see [LOG.md](LOG.md)._
+> _Agent-facing orientation. Current state of the repo, not the aspiration. Last synced 2026-06-25 (six-agent suite —
+> git · web · data · meeting-ops · research · echo; planner is the single delegation brain; live reasoning streaming
+> + oversight phase one — grounding verifier, control channel, mission-control dashboard; Aiven Kafka provisioned).
+> For where we're going, see [DESIGN.md](DESIGN.md); for why things are the way they are, see [LOG.md](LOG.md)._
 
 ---
 
@@ -24,17 +25,19 @@ remaining risk is no longer "missing wires" — it's **proving the full happy-pa
 | Pillar | State | Reality |
 |---|---|---|
 | **Knowledge graph** (`central-kg-api/`) | ✅ **strongest** | Live Aiven Postgres+pgvector, **seeded ~6,183 nodes / 26,179 edges** from `anthropic-sdk-python`; runtime retrieval is hybrid **pgvector + trigram** (~125 ms). OpenSearch is mirrored at seed time (`seed/mirror_opensearch.py`) but not yet queried at runtime. Demo-bankable data exists *today*. |
-| **Agent suite** (`agent-system/`) | ✅ **MCP-native showpiece** | One container: warm `mcp-aiven` session, Kafka consumer, harness, **+ a planner** (`planner.py`) that turns `meeting.transcript` into delegated `agent.tasks.*`. **git-agent, web-agent, and data-agent all work** — git answers from the live graph via `aiven_pg_read` (verified: top authors 387/32/23 commits); web-agent generates a site with Claude and publishes it to a served URL. echo runs no-creds; **data-agent renders charts** from the KG (SQL → matplotlib PNG artifact); web-agent is **local-serve only** (no Vercel yet). |
-| **Avatar / listener** (`avatar-agent/`, merged to `main`) | ✅ **the wow** | LiveKit + Recall + Anam talking-face; realtime STT→Sonnet→TTS; full Terraform. Reads the KG over HTTP to `central-kg-api` (correct for the latency-bound realtime layer), and **delegates heavy work via a wired `delegate()` tool** → gateway `POST /tasks` → Kafka `agent.tasks.*` ([tools.py](../avatar-agent/src/avatar_agent/tools.py)). Code-complete; prod just needs `GATEWAY_URL` injected (the Terraform doesn't set it yet). |
-| **Frontend** (`meet-joiner/`) | 🟡 **growing** | Next.js bot-launcher (`POST /api/join`) **+ a knowledge-graph explorer** (`/graph`, zero-dep canvas force graph over `central-kg-api`) **+ an agent dashboard** (`/dashboard`: live feed + task board + ask box over the gateway's `WS /stream` / `POST /tasks`). Still missing the in-call transcript overlay. The dashboard's e2e path (gateway↔Kafka↔runner) and `/graph` over the live KG are **both verified running locally**; degrades gracefully when a backend is down. |
+| **Agent suite** (`agent-system/`) | ✅ **MCP-native showpiece** | One container: warm `mcp-aiven` session, Kafka consumer, harness, **+ a planner** (`planner.py`) that turns `meeting.transcript` into delegated `agent.tasks.*`. **Six agents, five real.** **git/KG-agent** answers from the live graph via `aiven_pg_read` (verified: top authors 387/32/23 commits) — now with a **canned fast path** (templated SQL + 60s cache, one Haiku phrasing turn) alongside the agentic LLM path; **web-agent** generates a site with Claude (streamed) and publishes it to a served URL, with a persistent revisioned workspace; **data-agent** renders charts from the KG (strict-tool SQL → matplotlib PNG artifact); **meeting-ops** extracts recap/action-items/decisions from a transcript and **writes them back to the KG** via `aiven_pg_write` (idempotent upserts); **research** answers via Claude server-side web search/fetch (sources as artifacts). echo runs no-creds. A **grounding verifier** gates the git/data answers (annotate-only). web-agent is **local-serve only** (no Vercel yet). |
+| **Avatar / listener** (`avatar-agent/`, merged to `main`) | ✅ **the wow** | LiveKit + Recall + Anam talking-face; realtime STT→Sonnet→TTS; full Terraform. Reads the KG over HTTP to `central-kg-api` (correct for the latency-bound realtime layer). **Delegation now flows through the planner** (decided §6 of DESIGN): the avatar POSTs each final user utterance to the gateway's `/transcript` → `meeting.transcript` → the planner routes the work — so the same path serves the local `mock_meeting` and the real avatar. The direct `delegate()` tool ([tools.py](../avatar-agent/src/avatar_agent/tools.py)) is now **opt-in** (`AVATAR_DELEGATES=true`, planner then off). Code-complete; prod just needs `GATEWAY_URL` injected (the Terraform doesn't set it yet). |
+| **Frontend** (`meet-joiner/`) | 🟡 **growing** | Next.js bot-launcher (`POST /api/join`) **+ a knowledge-graph explorer** (`/graph`, zero-dep canvas force graph over `central-kg-api`) **+ a mission-control agent dashboard** (`/dashboard`: a live **digest bar** — active/stuck/grounded/flagged — over a tiled task board with **verdict badges**, collapsible **streamed reasoning** (markdown-rendered), per-card **stop** buttons, and an ask box; over the gateway's `WS /stream` / `POST /tasks` / `POST /control`). Still missing the in-call transcript overlay. The dashboard's e2e path (gateway↔Kafka↔runner) and `/graph` over the live KG are **both verified running locally**; degrades gracefully when a backend is down. |
 
 **The gap (narrowed to proof + deploy):** every seam is wired in code — `say.py`/avatar → `meeting.transcript` →
 planner → `agent.tasks.*` → runner → `agent.results` → gateway WS → dashboard. What's *not* yet banked: a single
 recorded run of the full happy-path, and a cloud deployment. Dispatch is proven on local redpanda; **Aiven Kafka is
 provisioned** (`kafka-254bd14f`, RUNNING, 9 topics created via MCP — see [LOG.md](LOG.md)), so the remaining deploy
-step is just pointing the runner/gateway at it (bootstrap + SASL creds). A few capability spots are still hollow:
-**embeddings (`embeddings.py` is a no-op → semantic search degrades to trigram), web-agent
-(local-serve, no Vercel), and the FE in-call transcript overlay (missing).**
+step is just pointing the runner/gateway at it (bootstrap + SASL creds + creating the topics the system has since
+grown to use — the bus is now **13 topics**: 6 `agent.tasks.*` incl. `.ops`/`.research`, plus `agent.trace` and
+`agent.control` were added after that provision). A few capability spots are still hollow: **embeddings
+(`embeddings.py` is a no-op → semantic search degrades to trigram), web-agent (local-serve, no Vercel), and the FE
+in-call transcript overlay (missing).**
 
 ## 3. Repo map — where the code actually is
 
@@ -42,7 +45,7 @@ step is just pointing the runner/gateway at it (bootstrap + SASL creds). A few c
 |---|---|---|---|
 | `central-kg-api/` | KG service (FastAPI/Mangum) + `seed/` CLI (tree-sitter + git → graph) | `main` | real, deployed-ready |
 | `infra/` | Aiven provisioning (`provision.sh`, `aiven-mcp.json`) + OpenSearch mirror | `main` | scripts ready; **Aiven Kafka provisioned** (`kafka-254bd14f`, 9 topics via MCP) |
-| `agent-system/` | our agent-runner container (shared spine + harness + git/echo/web agents + **gateway** + **planner**) + local redpanda dev + `mock_meeting` | `main` | foundation + gateway + web-agent + delegation (planner + avatar `delegate()`) done; needs the Aiven Kafka switch |
+| `agent-system/` | our agent-runner container (shared spine + harness + verifier + **git/echo/web/data/meeting-ops/research agents** + **gateway** + **planner**) + local redpanda dev + `mock_meeting` | `main` | foundation + gateway + 5 real agents + delegation (planner-brain) + oversight phase one done; needs the Aiven Kafka switch |
 | `meet-joiner/` | FE: bot-launcher + KG graph explorer (`/graph`) + agent dashboard (`/dashboard`) (Next.js, Vercel) | `main` | graph + dashboard built; e2e to gateway proven locally |
 | `avatar-agent/` | the listener/avatar (LiveKit/Recall/Anam) | `main` | **merged + delegating**; reads KG over HTTP, delegates heavy work via wired `delegate()` → gateway → Kafka |
 | demo transcripts / bench / extra tests | seed demo data | **`origin/feat/demo-data-layers`** | **unmerged** (additive) |
@@ -59,7 +62,10 @@ step is just pointing the runner/gateway at it (bootstrap + SASL creds). A few c
 - **33% autonomy** — the Aiven Kafka cluster exists and **all 9 topics were created via MCP** (`aiven_kafka_topic_create`)
   — the exact evidence judges want, already banked. Re-running a provision/topic-create step *on camera* makes it visible.
 - **33% creativity/impact** — the **web-agent is now real**: Claude generates a site and publishes it to a live URL,
-  shown as a clickable artifact on the dashboard task board. The **avatar** adds a differentiator most teams lack.
+  shown as a clickable artifact on the dashboard task board. **meeting-ops** closes a flywheel — it writes recap /
+  action-items / decisions back into the KG, so the graph the agents read keeps growing from the meeting itself; the
+  **research** agent adds live web search; and the **grounding verifier + mission-control dashboard** make the swarm
+  legible and trustworthy. The **avatar** adds a differentiator most teams lack.
 
 ## 5. Run it (local-first)
 
