@@ -201,12 +201,12 @@ export default function Home() {
           <h1 className="font-serif text-5xl font-medium tracking-[0.15em] text-[#f3ead3] sm:text-6xl">
             Aino
           </h1>
-          <p className="text-sm text-[#f3ead3]/75">
-            The agent who joins your meetings.
-            <br />
-            <span className="italic text-[#f3ead3]/55">
-              The sun never sets.
-            </span>
+          <p className="text-base text-[#f3ead3]/85">
+            The fastest path from meetings to results.
+          </p>
+          <p className="mx-auto max-w-md text-sm text-[#f3ead3]/60">
+            Agents live in Slack, GitHub, even WhatsApp. We put them in the
+            room where the work actually gets decided — so it can execute.
           </p>
         </div>
 
