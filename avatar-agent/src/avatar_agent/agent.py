@@ -195,8 +195,16 @@ async def entrypoint(ctx: JobContext) -> None:
         except Exception:  # never let artifact writing break shutdown
             logger.exception("failed to capture transcript")
         artifact.write(cfg.artifact_dir)
-        await backend.aclose()
-        await gateway.aclose()
+        # Drain in-flight transcript publishes before tearing the gateway down, or a
+        # detached _emit() is cancelled mid-flight and its utterance is silently lost.
+        if _bg:
+            await asyncio.gather(*_bg, return_exceptions=True)
+        # Close each client independently — a failure closing one must not leak the other.
+        for closer in (backend.aclose, gateway.aclose):
+            try:
+                await closer()
+            except Exception:
+                logger.warning("error closing client during shutdown", exc_info=True)
 
     ctx.add_shutdown_callback(_on_shutdown)
 

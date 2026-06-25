@@ -6,6 +6,7 @@ All secrets come from the environment / a secret manager — never hard-coded
 
 from __future__ import annotations
 
+import logging
 import os
 from functools import lru_cache
 from pathlib import Path
@@ -13,6 +14,8 @@ from typing import Literal
 
 from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+logger = logging.getLogger("avatar-agent.config")
 
 PipelineMode = Literal["cascade", "realtime"]
 SttProvider = Literal["soniox", "deepgram"]
@@ -112,8 +115,10 @@ def _load_env_files() -> None:
                         merged[k] = v
         for k, v in merged.items():
             os.environ.setdefault(k, v)
-    except Exception:
-        pass
+    except ImportError:
+        pass  # python-dotenv is an optional dev dependency; prod uses the real env
+    except Exception:  # a malformed/unreadable .env shouldn't be invisible
+        logger.debug("failed to merge .env files", exc_info=True)
 
 
 @lru_cache

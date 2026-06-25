@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sys
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -94,8 +95,15 @@ class ToolCallLog:
             yield handle
         finally:
             call.duration_ms = round((time.monotonic() - start) * 1000, 1)
-            if call.status == "running":  # block exited without ok/fail → treat as ok
-                call.status = "ok"
+            if call.status == "running":
+                # Block exited without ok()/fail(). If we're unwinding because it
+                # raised (not a clean return), the call crashed — record it as an
+                # error so a failed tool isn't mislabeled "ok" in the artifact.
+                if sys.exc_info()[0] is not None:
+                    call.status = "error"
+                    call.error = call.error or "uncaught exception"
+                else:
+                    call.status = "ok"
             logger.info(
                 "tool %s [%s] %s in %sms",
                 name,
