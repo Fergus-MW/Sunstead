@@ -5,6 +5,177 @@
 
 ---
 
+## 2026-06-25 — Landed the avatar, wired the delegation seam, and made the whole pipe testable locally
+
+**What:** brought the realtime layer onto `main` and closed the seams that turn three pillars into one system.
+(1) **Landed `avatar-agent/`** by checking out only that directory from `origin/ferg/avatar-agent` — *not* a
+wholesale merge (the branch is 1 commit past the fork while `main` is 23 ahead, and its `central-kg-api`/`meet-joiner`
+are pre-fork; a merge would have clobbered newer code). (2) **Wired the avatar→worker delegation seam** (DESIGN §3
+option a): a `delegate(intent, brief)` `@function_tool` + a `GatewayClient` + `GATEWAY_URL` config; intents map to the
+arg key each agent reads via `DELEGATE_ARG_KEY` (web→`brief`, git/data→`question`). (3) **Settled the `meeting_id`
+seam** as one source of truth in `dispatch.py` (`meeting_id_for`/`_for_room`/`_room_for`), threaded room→delegate→
+gateway→FE so a delegated result correlates to the call. (4) **Soniox** is now the default STT (`STT_PROVIDER`,
+`stt-rt-v5`); Deepgram is the fallback. (5) **Anam wired**: config loads the repo-root `.env` vault, accepts
+`ANAM_API_TOKEN` (alias of `ANAM_API_KEY`), and defaults `ANAM_AVATAR_ID`. (6) **FE**: `/api/join` dispatches to
+`AVATAR_DISPATCH_URL` (degrades gracefully) and the dashboard scopes by `?meeting_id=`. (7) **`mock_meeting`** +
+`make mock`: a one-terminal Google-Meet stand-in (speak → `meeting.transcript` → planner → agents → watch results),
+no Recall/LiveKit. (8) **`SINGLE_EC2.md`** runbook consolidating the avatar onto one box. (9) A **full-repo review**
+fixed the FE `INTENT_TEMPLATES` (4 arg-key bugs — `update_website`/`read_git`/`blame`/`recent_changes` sent keys the
+agents never read) and reconciled the docs to reality (this entry + DESIGN/OVERVIEW/DEPLOY/CENTRAL-KG-API edits;
+replaced the obsolete `AVATAR_DELEGATION.md` handoff with a "shipped" pointer).
+
+**Why:** the gap was never capability — it was integration. The avatar already worked; the one missing wire was a
+tool that hands work to the suite. Reusing the avatar's native HTTP-tool idiom (option a) over a Kafka producer in the
+realtime container keeps Kafka internal and adds zero deps. The `mock_meeting`/planner path means the entire pipe is
+testable today with only `ANTHROPIC_API_KEY` + `AIVEN_TOKEN` — the realtime trio (Recall/LiveKit/Cartesia) is the
+*only* thing it stubs, which is also the costliest to stand up.
+
+**Analysis / consequences:** there are now **two delegation brains** — the avatar's `delegate()` and the `planner`
+(tails `meeting.transcript`). They must not both fire on one utterance; the open call (DESIGN §6) is to make the
+**planner the single brain** (avatar emits transcript) so the mock literally exercises the production path. Still
+open: point runner/gateway at Aiven Kafka (bootstrap + SASL), land `demo-data`.
+
+**Touches:** `avatar-agent/**`, `agent-system/scripts/mock_meeting.py`, `agent-system/Makefile`,
+`meet-joiner/src/app/{api/join,page.tsx,dashboard}/**`, `docs/{OVERVIEW,DESIGN,DEPLOY,CENTRAL-KG-API,AGENT_SYSTEM,AVATAR_DELEGATION}.md`.
+
+— Claude (Opus 4.8), signed off
+
+---
+
+## 2026-06-25 — Proved the delegation loop end-to-end in Docker; killed the empty-base_url footgun
+
+**What:** ran the full spoken-sentence → delegation flow on the containerized stack and verified it from the bus,
+not the logs. Brought up `docker compose up` (redpanda + topics + runner + planner + gateway + sites), injected a
+transcript via `scripts/say.py`, and traced it through Kafka: the **planner turned one utterance into two tasks
+under a single `parent_task_id` (`plan_…`), correctly routed** (`build_website` → `agent.tasks.web`, `who_changed`
+→ `agent.tasks.git`) with cleanly rewritten args, both stamped `requested_by:"planner"`. The **runner executed
+both** (LLM calls `200 OK`); the **web-agent completed the full happy path** — a real site published to
+`http://localhost:8810/tsk_…/` (~17 KB) returned as a `url` artifact on `agent.results`. The git-agent ran and the
+LLM answered, but its `aiven_pg_read` came back "auth token expired" — an **Aiven credential issue, not a pipeline
+issue** (`AIVEN_TOKEN` needs refreshing / the org MCP toggle re-enabled). Verified each hop by reading topic
+watermarks and message bodies with `rpk` (echo round-trip, the two `task.create`s, the matching results).
+
+**Why:** "it builds" and "it works" are different claims; the operator asked to actually test e2e, and the only way
+to trust the loop is to watch a message traverse every topic. The no-creds **echo** round-trip proved the bus
+(publish → `agent.tasks.dev` → runner → `agent.results`) independent of any LLM, then the planner/web/git path
+proved the real thing on top of it.
+
+**Analysis / consequences:** the test surfaced a genuine deployment bug worth recording. The agents failed at first
+with a misleading `APIConnectionError: Connection error.` whose real cause was `UnsupportedProtocol: Request URL is
+missing an 'http://' protocol` — because **`agent-system/.env` carried an empty `ANTHROPIC_BASE_URL=`**, and the
+Anthropic SDK reads that env var directly and treats `""` as the base URL. This never bites on the host (our `.env`
+loader *skips* empty values) but **docker compose's `env_file` passes empties through** — a host/container parity
+gap. Fixes, defense-in-depth: (1) `shared/config.py` `__post_init__` now **scrubs** a non-URL/empty
+`ANTHROPIC_BASE_URL` from `os.environ` so the SDK can't pick it up (verified in-image: with `ANTHROPIC_BASE_URL=""`
+set, settings clear it and the env var is removed); (2) `.env.example` no longer ships an empty assignment — the key
+is commented out with a warning. Image rebuilt so the guard is baked in; stack recreated onto it. Also confirmed a
+real operational fact: containers **cannot** see the repo-root `.env` (only `agent-system/.env`), so creds the host
+loader merges up the tree must be present in the file the container reads. **Status:** delegation + web path proven
+in Docker; the lone red is the stale Aiven token (operator action). Not changed: runner at-least-once, registry,
+contracts.
+
+**Touches:** `agent-system/{.env.example}`, `agent-system/shared/src/shared/config.py` (env scrub; co-edited),
+`docs/LOG.md`. (Verification only — no infra deployed; the Docker image/compose from the prior entry unchanged
+except the rebuild.)
+
+— Claude (Opus 4.8), signed off
+
+---
+
+## 2026-06-25 — Made the KG explorer intuitive: lands populated, reads as structure, has view controls
+
+**What:** turned the graph explorer from "type a query at a blank canvas" into a surface a judge can read on
+arrival, across two passes. **Backend:** added `GET /overview` to `central-kg-api` (`graph.overview_centers` seeds
+from the highest-degree hub nodes, falls back to most-recently-updated when there are no edges) so the FE has a
+no-query landing view; a Next proxy (`/api/graph/overview`) fronts it. **FE (`meet-joiner/graph`):** the page now
+**auto-loads the overview on mount** (with an "Overview" reset + example chips); a redesigned **NodePanel** surfaces
+humanized properties (raw JSON behind a toggle) and — the key move — a **clickable connections list** that doubles
+as graph navigation; the canvas gained **directional arrowheads, focused-edge relationship labels, a hover tooltip,
+on-canvas zoom/fit/reset, and an interactive type-filter legend with counts**. Second pass fixed the lived-in
+complaints: replaced the jarring auto-fit **snap** with a **smooth eased camera** (split `view`/`target` + a settle-
+follow window that glides the frame out as the layout expands), retuned the force constants and added **hub emphasis
++ connectivity-based sizing** so structure reads even zoomed out, added **view modes** (color by Type / Links /
+Minimal) and a **Display settings menu** (label density, edge-label mode, hide-unconnected, spacing), and fixed a
+**property-panel text-clipping bug** (flex children lacked `min-w-0`, so shas/emails overflowed instead of wrapping).
+Verified end-to-end via headless-Chrome screenshots against the live Aiven graph (140-node overview, panel, color
+modes, settings).
+
+**Why:** the Aiven challenge is judged remotely from a video + written submission, so the explorer's job is to make
+the project's strongest invisible asset — the live ~6k-node graph — *legible at a glance*. Three operator complaints
+drove the work and each was a real UX failure, not a preference: (1) "I have to produce a query to see anything" —
+a graph tool that opens empty teaches the viewer nothing; the hub-seeded overview is the fix. (2) "nodes are hard to
+make value out of" — a dot with a raw-JSON dump isn't insight; the connections-as-navigation panel turns a node into
+a place you can walk from. (3) "it snaps to a zoomed-out version" — the hard one-shot fit *looked broken*, which on
+a demo reads as low quality. Clean, professional, intuitive **is** the deliverable here.
+
+**Analysis / consequences:** a few decisions worth recording. (1) **Kept the zero-dependency hand-rolled canvas**
+(per `meet-joiner/AGENTS.md`'s "this is not the Next you know" warning) — every feature, including the eased camera
+and color modes, is plain canvas + refs, no react-force-graph/Cytoscape, so no SSR/dep landmines. (2) The **eased
+camera** (rendered `view` chases a `target`; pan/zoom write both to avoid fighting the ease; a frame-counted follow
+re-fits only while settling and any interaction cancels it) is the load-bearing fix — it also makes spacing changes
+and "fit" feel intentional rather than abrupt. (3) **Connectivity is now the visual signal**: connected nodes are
+larger/brighter, isolated ones shrink and recede, hubs glow with persistent outlined labels. This is also an honest
+mirror of the data's real shape — the seeded graph is overwhelmingly `code_module` with sparse edges, so the explorer
+truthfully shows a hub-and-spoke of files around commits rather than faking density. (4) The **`/overview` seeding is
+degree-based with a recency fallback**, so it degrades gracefully on a fresh/edgeless graph. The standing limitation,
+unchanged by this entry: the UI can only render what's ingested — the biggest remaining unlock for "feels like a
+knowledge graph" is richer source ingestion (people/meetings/tasks/decisions via `/ingest`+`/extract`), which the
+panel and edge-labels are already built to display. Follow-ups: the FE changes (everything except the already-
+committed `/overview` backend) are **uncommitted in the working tree** and need a commit; optional "center & expand"
+(re-seed the subgraph around a clicked neighbor) and a recency color mode (needs `updated_at` plumbed onto the FE
+node shape).
+
+**Touches:** committed in `6711f78` — `central-kg-api/app/{graph.py, routers/subgraph.py}`,
+`meet-joiner/src/app/api/graph/overview/route.ts`. Uncommitted (working tree) —
+`meet-joiner/src/app/graph/{ForceGraph.tsx, NodePanel.tsx, page.tsx, types.ts, SettingsMenu.tsx (new)}`,
+`docs/LOG.md`. (No infra changed.)
+
+— Claude (Opus 4.8), signed off
+
+---
+
+## 2026-06-25 — Containerized the stack: one image, one-command local, real deploy path
+
+**What:** turned "works on my four terminals" into a buildable, deployable stack. Added `agent-system/Dockerfile`
+— **one image, four entrypoints** (runner / planner / gateway / sites), with **Node.js + `mcp-aiven` baked in**
+because the git/data agents launch the Aiven MCP server over stdio. Added `central-kg-api/Dockerfile.server` (a
+uvicorn variant beside the existing Lambda/Mangum `Dockerfile`). Rewrote `docker-compose.yml` so
+`docker compose up --build` (= `make stack`) brings up **redpanda + a one-shot topics creator + runner + planner +
+gateway + sites** with health-gated ordering and shared volumes for web-agent output; a `full` profile adds
+`central-kg-api`. Added `.dockerignore`s (keep `.venv`/`.env` out of the context), `make stack*`/`build` targets,
+and `.env.example` notes (compose overrides `KAFKA_BOOTSTRAP→redpanda:9092`; `DATABASE_URL` for the full profile).
+Wrote **`docs/DEPLOY.md`** (the operator runbook) and reconciled OVERVIEW §5/§7 + the docs README to it.
+**Verified for real:** `docker compose config` validates; the agent image **builds**; and inside it
+`import agent_runner{,.planner,.gateway}` succeeds, `node --version` = v20, `mcp-aiven` is on PATH.
+
+**Why:** the operator hit the wall directly — `make` isn't on Windows, and running each service by hand from the
+wrong directory failed four ways ("is this all kafka? do we run these every time? is there auto?"). The honest
+answers: Kafka is only the *internal* bus (edges are HTTP/WS/MCP); locally these are long-lived services so yes you
+start them each session — **unless** they're containerized, which is also exactly what makes them deployable. So one
+change ("one image, run four ways" + compose) answers both the "is there auto" pain *and* the "how do we deploy"
+question. The planner I built last pass cost **zero** new infra here — it's just the fourth command on the same
+image, which is the payoff of the one-image design.
+
+**Analysis / consequences:** a few decisions worth recording. (1) **One image, not four** — identical deps, one
+build/push, processes differ only by `command`; this is why adding the planner was free and why the deploy table
+collapsed from "two processes" to "N processes, one artifact". (2) **Node in the image is non-negotiable** — the
+34% MCP path runs `mcp-aiven` via stdio, so the runtime needs npm; pre-installing it globally avoids a per-task npx
+download. (3) Kept the KG API's **Lambda Dockerfile** and added a *server* one rather than replacing it — both
+deploy targets stay open (DESIGN keeps Lambda as the default; a VM/container host now works too). (4) `central-kg-api`
+is **opt-in** in compose (`--profile full`) because it needs live PG creds and has an independent deploy path —
+default `up` stays the self-contained agent bus. Two things flagged in DEPLOY as demo-day traps: the gateway WS and
+the KG API both need **public `wss://`/HTTPS + TLS** (Caddy in front on a VM), and secrets stay in the host env
+(the `.dockerignore` enforces it). Not done here (deliberately, unchanged scope): pushing images to a registry,
+the avatar's delegation seam, and the runner at-least-once commit. Local→Aiven Kafka remains a pure env flip.
+
+**Touches:** `agent-system/{Dockerfile (new), docker-compose.yml, .dockerignore (new), Makefile, .env.example}`,
+`central-kg-api/{Dockerfile.server (new)}`, `docs/{DEPLOY.md (new), OVERVIEW.md, README.md, LOG.md}`. (No infra
+deployed; no app code changed.)
+
+— Claude (Opus 4.8), signed off
+
+---
+
 ## 2026-06-25 — Added `/search`: BM25→graph retrieval (the smart read path)
 
 **What:** added `GET /search` to `central-kg-api` — OpenSearch BM25 over the mirrored `kg-nodes` index → node ids →

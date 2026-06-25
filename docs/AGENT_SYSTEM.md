@@ -15,7 +15,7 @@
 
 We own **one agent-runner container**: a long-lived Kafka consumer + a shared agent harness + the specialist
 agents + a file/session store + the thin FE gateway. We do **not** own the call/transcription stack — a teammate
-runs that in its **own** container (LiveKit/Recall + STT; *confirm which*). The knowledge graph is a teammate's
+runs that in its **own** container (`avatar-agent/` on `main`: LiveKit + Recall + Anam, Soniox STT). The knowledge graph is a teammate's
 `central-kg-api`, but **our agents never call its HTTP API** — they read/write the same Aiven Postgres directly
 through Aiven MCP (§7).
 

@@ -36,7 +36,7 @@ speaks its native, latency-appropriate idiom, joined by one explicit seam.
 ```
 
 **Realtime layer = the avatar.** Recall.ai joins the Meet and streams the Anam avatar as the bot's camera; LiveKit
-runs the STT→LLM→TTS loop (Deepgram / Anthropic Sonnet / Cartesia). Its tools read the KG over **HTTP to
+runs the STT→LLM→TTS loop (Soniox `stt-rt-v5` default / Deepgram fallback · Anthropic Sonnet · Cartesia). Its tools read the KG over **HTTP to
 `central-kg-api`** — and that's *correct here*: a <0.3 s in-conversation lookup can't afford an MCP detour. **The
 avatar is a human-facing realtime client, like the FE — not one of the MCP worker agents.**
 
@@ -63,15 +63,12 @@ something it isn't.
 (async facts), `meeting.transcript` (from the avatar, optional). Payloads are pydantic models in
 `agent-system/shared/contracts.py` — **change = PR + a LOG entry.** (Detail: [AGENT_SYSTEM.md](AGENT_SYSTEM.md) §6.)
 
-**The avatar → worker delegation seam** (the one wire that turns three pillars into one system). The avatar adds a
-`delegate(intent, args)` tool. Two bridge options (see [LOG.md](LOG.md) 2026-06-25):
-- **(a) HTTP edge → gateway → Kafka** *(recommended default)* — the tool `POST`s to the gateway's `/tasks`, which
-  produces the `agent.tasks.*` message. Reuses the avatar's native HTTP-tool idiom (zero new deps for Ferg); the
-  gateway is the single authenticated task front door (FE "ask box" uses it too). Kafka stays internal to our side.
-- **(b) Direct Kafka** — the avatar gains an `aiokafka` producer and writes `agent.tasks.*` itself. Keeps "pure
-  Kafka," but pushes Kafka creds + deps into a finished realtime container.
-- **Decision:** (a) unless Ferg prefers to own a Kafka producer. *Pending his sign-off.* Either way, worker↔worker
-  and result-broadcast stay on Kafka — the choice only affects the single external ingress edge.
+**The avatar → worker delegation seam** (the one wire that turns three pillars into one system) — **shipped, option (a)**.
+The avatar's `delegate(intent, brief)` tool `POST`s to the gateway's `/tasks`, which produces the `agent.tasks.*`
+message (`avatar-agent/src/avatar_agent/{gateway.py,tools.py}`; see [AVATAR_DELEGATION.md](AVATAR_DELEGATION.md)).
+Chosen over (b) direct-Kafka because it reuses the avatar's native HTTP-tool idiom (no Kafka creds/deps in the
+realtime container) and the gateway is the single authenticated task front door (the FE "ask box" uses it too).
+Worker↔worker and result-broadcast stay on Kafka — option (a) only shapes the single external ingress edge.
 
 **Result return.** Heavy work is async, so the avatar's tool is **fire-and-forget** ("on it — I'll put it on
 screen"). The deliverable surfaces on the **FE** (gateway → WS). Spoken results are a *later, separate* notify edge
@@ -89,40 +86,40 @@ runs (locally is fine).
 | Component | Host | Notes |
 |---|---|---|
 | agent-runner | one container — ECS Fargate / EC2 | long-lived consumer + warm `mcp-aiven` + durable session volume |
-| avatar-agent | LiveKit on EC2 + dispatch Lambda + viewer on S3/CloudFront | Ferg's Terraform |
+| avatar-agent | LiveKit on EC2 + dispatch Lambda + viewer on S3/CloudFront, **or** all on one EC2 ([SINGLE_EC2.md](../avatar-agent/deploy/SINGLE_EC2.md)) | on `main`; Terraform in `avatar-agent/deploy/` |
 | central-kg-api | Lambda (Mangum) | seed + FE/avatar read bridge |
 | frontend / viewer | Vercel / S3 | |
-| Aiven (PG+pgvector, **Kafka**, OpenSearch) | Aiven cloud | **Kafka still to be provisioned — do it via MCP, on camera** |
+| Aiven (PG+pgvector, **Kafka**, OpenSearch) | Aiven cloud | Kafka **provisioned** via MCP (`kafka-254bd14f`, 9 topics); remaining: point runner/gateway at it (bootstrap + SASL) |
 
-## 5. Roadmap — "three wires and a merge" (rubric-ordered)
+## 5. Roadmap — what's done, what's left
 
-The remaining risk is **integration, not capability.** Each step below is hours, not days, and maps to the score.
+The remaining risk is **integration, not capability.** Most of the original "three wires and a merge" is done.
 
-1. **Merge the unmerged branches** → `main` (avatar, demo-data). Get the whole system on the integration line.
-   *Owner's PR for teammate branches; we don't merge those unilaterally.*
-2. **Provision Aiven Kafka via MCP, on camera** → `kafka_admin` creates topics. *Kills the infra gap; banks 33%
-   autonomy.*
-3. **Make web-agent real** — a tiny static site → Vercel from a mid-call brief. *33% creativity/impact; the visual
-   wow; and the one genuine delegation target (the avatar can already answer reads itself).*
-4. **Wire the delegation seam** (§3, option a) — avatar `delegate` → `agent.tasks.web` → web-agent → Vercel URL →
-   shown on the FE. *This is the single highest-leverage wire: it turns three pillars into one system.*
-5. **Build the gateway** (`POST /tasks` + `WS /stream`) — needed for both #4 and the FE result display.
-6. **git-agent on camera** — record it issuing `aiven_pg_read` through `mcp-aiven` on the live graph. *No new code;
-   it's already the 34% proof.*
-7. **Reconcile docs to reality** — this doc system (OVERVIEW/DESIGN/LOG) is step zero; fold PLAN/AGENT_SYSTEM detail
-   in over time.
+**Done (this build):** avatar merged to `main`; Aiven Kafka provisioned via MCP (`kafka-254bd14f`, 9 topics);
+web-agent real (site → served URL); delegation seam wired *twice* — the avatar's `delegate()` (§3, option a) **and**
+the `planner` (tails `meeting.transcript` → `agent.tasks.*`); gateway built (`POST /tasks` + `WS /stream`, with a
+replay ring buffer); Soniox STT + Anam avatar wired; FE `/api/join` dispatches + the dashboard scopes by `meeting_id`;
+a `mock_meeting` harness drives the whole pipe locally with no Recall/LiveKit.
 
-Two trajectories share these steps: **win the live demo** (1→5) and **win the written Anthropic submission** (a
-diagram that matches the code + logs of real `aiven_pg_read` calls + the MCP-depth narrative). Both are served by
-closing the seams.
+**Left:**
+1. **Point runner/gateway at Aiven Kafka** (bootstrap + SASL creds) — flips local→cloud by env only.
+2. **Land `demo-data`** (the remaining unmerged, additive branch).
+3. **Decide the single delegation brain** (see §6) — planner vs avatar `delegate()` — so they don't both fire.
+4. **Avatar emits `meeting.transcript`** (if the planner is chosen as the brain) — lights up the FE transcript too.
+5. **Record the happy-path run** for the written submission: `aiven_pg_read` over `mcp-aiven` (the 34% proof) +
+   the ask-box → Kafka → agent → live-result loop.
+
+Both trajectories — **win the live demo** and **win the written Anthropic submission** — are served by #1–#5.
 
 ## 6. Open decisions
 
-- **Delegation seam (a) vs (b)** — pending Ferg; default (a). §3.
+- **One delegation brain.** Two now exist: the avatar's `delegate()` (HTTP→gateway) and the `planner`
+  (consumes `meeting.transcript`). They must not both delegate the same utterance. *Recommendation:* avatar emits
+  `meeting.transcript`, the **planner** is the single brain (same path serves the `mock_meeting` and the real
+  avatar), with `delegate()` kept as an explicit "go do X" fast-path. §3 / [OVERVIEW.md](OVERVIEW.md).
 - **Spoken vs FE-only results** — FE-only for the demo; spoken is a later notify edge. §3.
-- **Kafka provisioning timing** — do it early and on camera (autonomy evidence). §5.2.
 - **Doc consolidation** — fold PLAN/AGENT_SYSTEM/HACKINFO detail into DESIGN/OVERVIEW as we go; keep them as deep
-  references meanwhile. §5.7.
+  references meanwhile.
 
 ---
 

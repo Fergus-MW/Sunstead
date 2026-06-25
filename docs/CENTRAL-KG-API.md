@@ -23,7 +23,7 @@ Two write paths feed it:
 
 1. **Repo seeding** — tree-sitter + git walk over the target codebase produces
    `file/function/class/commit/person` nodes and `DEFINES/IMPORTS/CALLS/
-   AUTHORED/TOUCHES` edges. *(not yet implemented; see Gaps.)*
+   AUTHORED/TOUCHES` edges. *(implemented — `seed/`; ~6,183 nodes / 26,179 edges seeded live.)*
 2. **Live meeting writes** — the Listener agent emits `meeting/utterance/claim`
    nodes plus `MENTIONS/ABOUT` edges into the same graph, grounding what's said
    in the code.
