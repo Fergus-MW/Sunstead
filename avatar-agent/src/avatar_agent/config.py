@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     # ── Recall.ai (meeting transport) ──
     recall_api_key: str = Field(default="", alias="RECALL_API_KEY")
     recall_region: str = Field(default="us-east-1", alias="RECALL_REGION")
-    bot_name: str = Field(default="Sunstead Avatar", alias="BOT_NAME")
+    bot_name: str = Field(default="Aino", alias="BOT_NAME")
 
     # ── LiveKit (orchestration transport) ──
     livekit_url: str = Field(default="", alias="LIVEKIT_URL")
@@ -50,6 +50,13 @@ class Settings(BaseSettings):
         default="edf6fdcb-acab-44b8-b974-ded72665ee26", alias="ANAM_AVATAR_ID"
     )
     anam_avatar_name: str = Field(default="Sunstead", alias="ANAM_AVATAR_NAME")
+    # Cap the avatar's output resolution to keep video smooth over the multi-hop
+    # path (Anam → LiveKit → Recall → Meet): lower res = less bandwidth = fewer
+    # dropped frames. 0/0 (default) → Anam uses the model's native size. Anam
+    # validates the (width, height) pair and rejects unsupported pairs with HTTP
+    # 400, so tune per-deploy rather than assuming an arbitrary pair works.
+    anam_video_width: int = Field(default=0, alias="ANAM_VIDEO_WIDTH")
+    anam_video_height: int = Field(default=0, alias="ANAM_VIDEO_HEIGHT")
 
     # ── Cognition ──
     pipeline_mode: PipelineMode = Field(default="realtime", alias="PIPELINE_MODE")

@@ -10,23 +10,21 @@ variable "name_prefix" {
   default     = "sunstead-avatar"
 }
 
-# ── DNS (self-hosted LiveKit needs TLS, which needs a real domain) ──
+# ── DNS (self-hosted LiveKit needs TLS, which needs a hostname) ──
+# Leave both blank to auto-derive a hostname from the Elastic IP via sslip.io
+# (e.g. 1-2-3-4.sslip.io) — Caddy still gets a real Let's Encrypt cert, with zero
+# DNS setup. Set them to use your own domain instead (more robust; no shared-
+# domain cert rate limits) and point A records at the livekit_eip output.
 variable "livekit_domain" {
-  description = <<-EOT
-    Fully-qualified domain for the LiveKit signaling endpoint, e.g.
-    "livekit.sunstead.example.com". You must point an A record at the EIP this
-    stack outputs (livekit_eip). Caddy on the instance auto-issues a Let's
-    Encrypt cert for it, giving wss://<domain>.
-  EOT
+  description = "LiveKit signaling FQDN, e.g. livekit.example.com. Blank = auto sslip.io from the EIP."
   type        = string
+  default     = ""
 }
 
 variable "livekit_turn_domain" {
-  description = <<-EOT
-    Domain for the embedded TURN/TLS server, e.g. "turn.sunstead.example.com".
-    Point an A record at the same EIP. Used by clients on restrictive networks.
-  EOT
+  description = "TURN FQDN, e.g. turn.example.com. Blank = reuse the signaling hostname."
   type        = string
+  default     = ""
 }
 
 variable "acme_email" {
@@ -53,7 +51,7 @@ variable "ssh_key_name" {
   default     = ""
 }
 
-# ── Image build / rollout (build.tf) ──
+# ── Fargate agent worker ──
 variable "auto_build" {
   description = <<-EOT
     When true (default), `terraform apply` builds the agent + dispatch images
@@ -66,9 +64,8 @@ variable "auto_build" {
   default     = true
 }
 
-# ── Fargate agent worker ──
 variable "agent_image_tag" {
-  description = "Image tag the Fargate service runs (push to the ECR repo this stack creates)."
+  description = "Image tag the Fargate service runs when auto_build=false (push it yourself)."
   type        = string
   default     = "latest"
 }
@@ -106,7 +103,13 @@ variable "llm_model" {
 variable "bot_name" {
   description = "Display name the Recall bot uses in the meeting."
   type        = string
-  default     = "Sunstead Avatar"
+  default     = "Aino"
+}
+
+variable "recall_region" {
+  description = "Recall.ai region your API key belongs to (must match the key, e.g. eu-central-1)."
+  type        = string
+  default     = "us-east-1"
 }
 
 variable "anam_avatar_name" {
@@ -121,15 +124,20 @@ variable "anam_avatar_id" {
   default     = ""
 }
 
-variable "stt_provider" {
-  description = <<-EOT
-    Cascade STT engine: "deepgram" (what this stack provisions a key for) or
-    "soniox". If you set "soniox", also add soniox_api_key to the SSM provider
-    secrets and inject SONIOX_API_KEY into the task — otherwise the worker raises
-    on a missing key at session start.
-  EOT
-  type        = string
-  default     = "deepgram"
+# Cap the avatar's output resolution for smoother video over the multi-hop path.
+# 0/0 = Anam's model default. Anam rejects unsupported (w,h) pairs with HTTP 400,
+# so if the avatar stops appearing after a change, try another standard pair
+# (e.g. 854x480, 512x512) — it's an env-only change (no image rebuild).
+variable "anam_video_width" {
+  description = "Avatar output width in px (0 = Anam default). Pair with anam_video_height."
+  type        = number
+  default     = 0
+}
+
+variable "anam_video_height" {
+  description = "Avatar output height in px (0 = Anam default). Pair with anam_video_width."
+  type        = number
+  default     = 0
 }
 
 variable "stt_model" {
@@ -140,17 +148,6 @@ variable "stt_model" {
 
 variable "backend_url" {
   description = "Base URL of the backend API the custom tools call (e.g. central-kg-api)."
-  type        = string
-  default     = ""
-}
-
-variable "gateway_url" {
-  description = <<-EOT
-    Base URL of the agent-system gateway (the delegation edge). The avatar POSTs
-    /tasks here for `delegate` and /transcript for each final utterance. Blank =
-    delegation/transcript-feed off (degrades gracefully). If the gateway requires
-    auth, also provision a gateway_token secret and inject GATEWAY_TOKEN.
-  EOT
   type        = string
   default     = ""
 }

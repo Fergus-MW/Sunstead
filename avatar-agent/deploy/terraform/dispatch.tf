@@ -57,15 +57,16 @@ resource "aws_lambda_function" "dispatch" {
   function_name = "${var.name_prefix}-dispatch"
   role          = aws_iam_role.dispatch.arn
   package_type  = "Image"
-  image_uri     = "${aws_ecr_repository.dispatch.repository_url}:${var.dispatch_image_tag}"
+  image_uri     = "${aws_ecr_repository.dispatch.repository_url}:${local.dispatch_image_tag_effective}"
   timeout       = 30
   memory_size   = 256
 
   environment {
     variables = {
-      LIVEKIT_URL = local.livekit_ws_url
-      VIEWER_URL  = local.viewer_url
-      BOT_NAME    = var.bot_name
+      LIVEKIT_URL   = local.livekit_ws_url
+      VIEWER_URL    = local.viewer_url
+      BOT_NAME      = var.bot_name
+      RECALL_REGION = var.recall_region
       # Resolve SSM SecureStrings at cold start via the pydantic-settings env.
       # (Lambda can't natively inject SSM like ECS, so the handler reads them.)
       LIVEKIT_API_KEY_SSM    = aws_ssm_parameter.livekit_api_key.name
@@ -75,10 +76,34 @@ resource "aws_lambda_function" "dispatch" {
   }
 
   # The image must exist in ECR before this applies cleanly — see README order.
-  depends_on = [aws_ecr_repository.dispatch]
+  depends_on = [aws_ecr_repository.dispatch, terraform_data.dispatch_build]
 }
 
 resource "aws_lambda_function_url" "dispatch" {
   function_name      = aws_lambda_function.dispatch.function_name
-  authorization_type = "NONE" # public; front-end calls it directly. See README to lock down.
+  authorization_type = "NONE" # public; the meet-joiner front-end POSTs directly.
+}
+
+# A NONE-auth Function URL created after Oct 2025 needs TWO resource-policy
+# statements — lambda:InvokeFunctionUrl AND lambda:InvokeFunction (with the
+# InvokedViaFunctionUrl condition). The console adds both; the AWS provider's
+# aws_lambda_permission can't express the InvokedViaFunctionUrl condition, so we
+# add both via the CLI here (idempotent: re-adding an existing sid is ignored).
+# Without the second statement the URL silently 403s.
+resource "terraform_data" "dispatch_url_perms" {
+  triggers_replace = aws_lambda_function_url.dispatch.id
+
+  provisioner "local-exec" {
+    interpreter = ["/bin/bash", "-c"]
+    command     = <<-EOT
+      set -euo pipefail
+      fn=${aws_lambda_function.dispatch.function_name}
+      aws lambda add-permission --region ${var.region} --function-name "$fn" \
+        --statement-id PublicInvokeUrl --action lambda:InvokeFunctionUrl \
+        --principal '*' --function-url-auth-type NONE 2>/dev/null || true
+      aws lambda add-permission --region ${var.region} --function-name "$fn" \
+        --statement-id UrlPolicyInvokeFunction --action lambda:InvokeFunction \
+        --principal '*' --invoked-via-function-url 2>/dev/null || true
+    EOT
+  }
 }

@@ -79,7 +79,7 @@ resource "aws_iam_role" "agent_task" {
 # ── Security group: egress only ──
 resource "aws_security_group" "agent" {
   name        = "${var.name_prefix}-agent"
-  description = "Agent worker — egress only"
+  description = "Agent worker - egress only"
   vpc_id      = aws_vpc.main.id
 
   egress {
@@ -105,28 +105,21 @@ resource "aws_ecs_task_definition" "agent" {
   container_definitions = jsonencode([
     {
       name      = "agent"
-      image     = "${aws_ecr_repository.agent.repository_url}:${var.agent_image_tag}"
+      image     = "${aws_ecr_repository.agent.repository_url}:${local.agent_image_tag_effective}"
       essential = true
 
       environment = [
         { name = "PIPELINE_MODE", value = var.pipeline_mode },
-        # The app defaults STT_PROVIDER=soniox, but this stack provisions Deepgram
-        # (deepgram_api_key in SSM, STT_MODEL=nova-3). Pin the provider so the task
-        # matches the secret it's given — otherwise _build_stt() raises on a missing
-        # SONIOX_API_KEY and the worker dies at session start.
-        { name = "STT_PROVIDER", value = var.stt_provider },
         { name = "LLM_MODEL", value = var.llm_model },
         { name = "STT_MODEL", value = var.stt_model },
         { name = "LIVEKIT_URL", value = local.livekit_ws_url },
         { name = "BOT_NAME", value = var.bot_name },
         { name = "ANAM_AVATAR_NAME", value = var.anam_avatar_name },
         { name = "ANAM_AVATAR_ID", value = var.anam_avatar_id },
+        { name = "ANAM_VIDEO_WIDTH", value = tostring(var.anam_video_width) },
+        { name = "ANAM_VIDEO_HEIGHT", value = tostring(var.anam_video_height) },
         { name = "BACKEND_URL", value = var.backend_url },
         { name = "BACKEND_TIMEOUT", value = "0.3" },
-        # Delegation edge: where the `delegate` tool POSTs /tasks and each final
-        # utterance is published to /transcript. Blank = delegation off (the avatar
-        # degrades gracefully and the FE transcript feed stays empty).
-        { name = "GATEWAY_URL", value = var.gateway_url },
         { name = "ARTIFACT_DIR", value = "/tmp/artifacts" },
         { name = "LOG_LEVEL", value = "INFO" },
       ]
@@ -152,6 +145,9 @@ resource "aws_ecs_task_definition" "agent" {
       }
     }
   ])
+
+  # Ensure the image for this tag is in ECR before registering the task def.
+  depends_on = [terraform_data.agent_build]
 }
 
 resource "aws_ecs_service" "agent" {

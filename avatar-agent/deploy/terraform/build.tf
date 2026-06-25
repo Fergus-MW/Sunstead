@@ -75,6 +75,11 @@ resource "terraform_data" "dispatch_build" {
   count            = var.auto_build ? 1 : 0
   triggers_replace = "${local.dispatch_src_hash}-${local.build_recipe}"
 
+  # Serialize after the agent build: both run `docker login` to the same registry,
+  # and concurrent logins race on the macOS keychain credential store
+  # ("item already exists in the keychain (-25299)"). Sequential logins are safe.
+  depends_on = [terraform_data.agent_build]
+
   provisioner "local-exec" {
     working_dir = local.repo_root
     interpreter = ["/bin/bash", "-c"]
