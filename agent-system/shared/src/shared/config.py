@@ -82,6 +82,9 @@ class McpSettings:
     cmd: str = field(default_factory=_default_mcp_cmd)
     args: list[str] = field(default_factory=lambda: (_env("MCP_AIVEN_ARGS", "-y mcp-aiven")).split())
     read_only: bool = field(default_factory=lambda: _env("AIVEN_READ_ONLY", "false").lower() == "true")
+    # expose service credentials (Kafka certs, connection URIs) in MCP responses — needed
+    # to fetch the Aiven Kafka connection for the agent-runner. Keep OFF unless fetching creds.
+    allow_secrets: bool = field(default_factory=lambda: _env("AIVEN_ALLOW_SECRETS", "false").lower() == "true")
 
     @property
     def configured(self) -> bool:

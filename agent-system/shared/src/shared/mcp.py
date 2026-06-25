@@ -40,6 +40,7 @@ class AivenMCP:
             "AIVEN_TOKEN": self._s.aiven_token,
             "AIVEN_SERVICES_SCOPE": self._s.services_scope,
             "AIVEN_READ_ONLY": "true" if self._s.read_only else "false",
+            "AIVEN_ALLOW_SECRETS": "true" if self._s.allow_secrets else "false",
         }
         params = StdioServerParameters(command=self._s.cmd, args=self._s.args, env=env)
 
