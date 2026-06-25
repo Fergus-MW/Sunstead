@@ -1,10 +1,8 @@
-"""Create our Kafka topics idempotently.
-
-Aiven has auto-create OFF, so topics must be declared. Run once after provisioning:
+"""Create our Kafka topics idempotently (Aiven auto-create is OFF; redpanda is fine too).
 
     uv run python infra/kafka_admin.py
 
-Topic list + partition/RF config lives in shared.config.ALL_TOPICS.
+Partition/RF come from config (local defaults 1/1; set KAFKA_PARTITIONS=3 KAFKA_RF=3 for Aiven).
 """
 
 from __future__ import annotations
@@ -15,24 +13,22 @@ from aiokafka.admin import AIOKafkaAdminClient, NewTopic
 from aiokafka.errors import TopicAlreadyExistsError
 
 from shared import config
-from shared.kafka import _common  # reuse the same TLS/SASL wiring
+from shared.kafka import _common  # reuse the same PLAINTEXT/SASL/SSL wiring
 
 
 async def main() -> None:
-    k = config.load().kafka
+    s = config.load()
+    k = s.kafka
     admin = AIOKafkaAdminClient(**_common(k))
     await admin.start()
     try:
-        new = [
-            NewTopic(name=name, num_partitions=parts, replication_factor=rf)
-            for (name, parts, rf) in config.ALL_TOPICS
-        ]
-        for topic in new:
+        for name in config.ALL_TOPICS:
+            topic = NewTopic(name=name, num_partitions=k.partitions, replication_factor=k.replication_factor)
             try:
                 await admin.create_topics([topic])
-                print(f"created  {topic.name} (p={topic.num_partitions}, rf={topic.replication_factor})")
+                print(f"created  {name} (p={k.partitions}, rf={k.replication_factor})")
             except TopicAlreadyExistsError:
-                print(f"exists   {topic.name}")
+                print(f"exists   {name}")
     finally:
         await admin.close()
 

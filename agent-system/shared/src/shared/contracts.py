@@ -2,11 +2,9 @@
 
 The single source of truth for what flows over Kafka. Every component imports these
 models instead of hand-rolling dicts. Changing a payload here is a cross-team event
-(see docs/AGENT_SYSTEM.md §4) — PR it and note the doc.
+(see docs/AGENT_SYSTEM.md §6) — PR it and note the doc.
 
-Envelope wraps a typed payload:
-
-    Envelope[TranscriptPayload](type="transcript.final", payload=...)
+    Envelope[TaskCreatePayload](type="task.create", meeting_id=..., ts=..., payload=...)
 """
 
 from __future__ import annotations
@@ -46,8 +44,9 @@ class MeetingEventPayload(BaseModel):
     participant: Speaker | None = None
 
 
-# intents are the controlled vocab per agent (docs/AGENT_SYSTEM.md §3.4)
+# intents are the controlled vocab per agent (docs/AGENT_SYSTEM.md §9)
 TaskIntent = Literal[
+    "echo",                                                  # dev / smoke (no creds)
     "build_website", "update_website",                       # web-agent
     "analyze", "summarize_metrics", "query_data",            # data-agent
     "read_git", "blame", "who_changed", "recent_changes",    # git-agent
@@ -59,6 +58,11 @@ class TaskCreatePayload(BaseModel):
     intent: TaskIntent
     args: dict = Field(default_factory=dict)
     context_refs: list[str] = Field(default_factory=list)  # pointers into KG, not blobs
+    # harness fields (docs/AGENT_SYSTEM.md §4)
+    idempotency_key: str | None = None                     # dedupe redelivery; defaults to task_id
+    workspace_id: str | None = None                        # web-agent persistent workspace
+    parent_task_id: str | None = None                      # agent→agent subtask graph
+    depth: int = 0                                          # depth-limited (e.g. <= 2)
     requested_by: str = "listener"
     reply_to: str = "agent.results"
 
@@ -70,10 +74,17 @@ class Artifact(BaseModel):
 
 class TaskResultPayload(BaseModel):
     task_id: str
-    status: Literal["progress", "completed", "failed"]
+    status: Literal["completed", "failed"]
     result: dict | None = None
     artifacts: list[Artifact] = Field(default_factory=list)
     error: str | None = None
+
+
+class ActivityPayload(BaseModel):
+    """Visible status for the FE feed — NOT chain-of-thought (docs/AGENT_SYSTEM.md §4)."""
+    task_id: str
+    status: str                                            # "received" | "building site" | ...
+    detail: str | None = None
 
 
 class KgUpdatePayload(BaseModel):
@@ -85,7 +96,7 @@ class KgUpdatePayload(BaseModel):
 
 Payload = Union[
     TranscriptPayload, MeetingEventPayload, TaskCreatePayload,
-    TaskResultPayload, KgUpdatePayload,
+    TaskResultPayload, ActivityPayload, KgUpdatePayload,
 ]
 
 # --- envelope -------------------------------------------------------------
@@ -93,7 +104,8 @@ Payload = Union[
 MessageType = Literal[
     "transcript.partial", "transcript.final",
     "meeting.event",
-    "task.create", "task.progress", "task.completed", "task.failed",
+    "task.create", "task.completed", "task.failed",
+    "activity",
     "kg.update",
 ]
 
@@ -105,7 +117,7 @@ class Envelope(BaseModel, Generic[P]):
     id: str = Field(default_factory=lambda: str(uuid4()))
     type: MessageType
     meeting_id: str
-    ts: str  # ISO-8601, producer clock — pass explicitly, never derive in workflows
+    ts: str  # ISO-8601, producer clock — pass explicitly
     payload: P
 
     model_config = {"populate_by_name": True}

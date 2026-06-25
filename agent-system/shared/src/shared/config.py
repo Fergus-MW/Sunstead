@@ -1,11 +1,13 @@
 """Environment-driven config + the single source of Kafka topic names.
 
-Topic names live here (not in infra/) so every component and the admin script agree.
+Topic names live here so every component and the admin script agree. Defaults are
+**local-first** (redpanda PLAINTEXT on localhost); flip the env to point at Aiven.
 """
 
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass, field
 
 
@@ -16,23 +18,24 @@ MEETING_EVENTS = "meeting.events"
 TASKS_WEB = "agent.tasks.web"
 TASKS_DATA = "agent.tasks.data"
 TASKS_GIT = "agent.tasks.git"
+TASKS_DEV = "agent.tasks.dev"        # dev/echo (no creds)
 RESULTS = "agent.results"
+ACTIVITY = "agent.activity"          # visible status feed to the FE
 KG_UPDATES = "kg.updates"
-REASONING = "agent.reasoning"  # stretch
 
-# (name, partitions, replication_factor) — RF 3 is the Aiven default
-ALL_TOPICS: list[tuple[str, int, int]] = [
-    (TRANSCRIPT, 3, 3),
-    (MEETING_EVENTS, 3, 3),
-    (TASKS_WEB, 3, 3),
-    (TASKS_DATA, 3, 3),
-    (TASKS_GIT, 3, 3),
-    (RESULTS, 3, 3),
-    (KG_UPDATES, 3, 3),
-    (REASONING, 3, 3),
+# topics our agent-runner CONSUMES
+TASK_TOPICS: list[str] = [TASKS_WEB, TASKS_DATA, TASKS_GIT, TASKS_DEV]
+
+# every topic the admin script ensures exists
+ALL_TOPICS: list[str] = [
+    TRANSCRIPT, MEETING_EVENTS,
+    TASKS_WEB, TASKS_DATA, TASKS_GIT, TASKS_DEV,
+    RESULTS, ACTIVITY, KG_UPDATES,
 ]
 
+# intent -> the task topic a producer should publish to
 TASK_TOPIC_BY_INTENT = {
+    "echo": TASKS_DEV,
     "build_website": TASKS_WEB, "update_website": TASKS_WEB,
     "analyze": TASKS_DATA, "summarize_metrics": TASKS_DATA, "query_data": TASKS_DATA,
     "read_git": TASKS_GIT, "blame": TASKS_GIT, "who_changed": TASKS_GIT, "recent_changes": TASKS_GIT,
@@ -45,26 +48,64 @@ def _env(key: str, default: str = "") -> str:
     return os.environ.get(key, default)
 
 
+def _int(key: str, default: int) -> int:
+    try:
+        return int(os.environ.get(key, "") or default)
+    except ValueError:
+        return default
+
+
 @dataclass
 class KafkaSettings:
-    bootstrap: str = field(default_factory=lambda: _env("KAFKA_BOOTSTRAP"))
-    security: str = field(default_factory=lambda: _env("KAFKA_SECURITY", "SASL_SSL"))
+    bootstrap: str = field(default_factory=lambda: _env("KAFKA_BOOTSTRAP", "localhost:19092"))
+    security: str = field(default_factory=lambda: _env("KAFKA_SECURITY", "PLAINTEXT"))  # PLAINTEXT|SASL_SSL|SSL
     sasl_mechanism: str = field(default_factory=lambda: _env("KAFKA_SASL_MECHANISM", "SCRAM-SHA-256"))
     username: str = field(default_factory=lambda: _env("KAFKA_USERNAME", "avnadmin"))
     password: str = field(default_factory=lambda: _env("KAFKA_PASSWORD"))
     ca_path: str = field(default_factory=lambda: _env("KAFKA_CA_PATH", "./ca.pem"))
     cert_path: str = field(default_factory=lambda: _env("KAFKA_CERT_PATH"))
     key_path: str = field(default_factory=lambda: _env("KAFKA_KEY_PATH"))
+    partitions: int = field(default_factory=lambda: _int("KAFKA_PARTITIONS", 1))   # local=1, Aiven=3
+    replication_factor: int = field(default_factory=lambda: _int("KAFKA_RF", 1))   # local=1, Aiven=3
+
+
+def _default_mcp_cmd() -> str:
+    # npx on Windows is npx.cmd; the Linux container uses npx
+    return _env("MCP_AIVEN_CMD", "npx.cmd" if sys.platform == "win32" else "npx")
+
+
+@dataclass
+class McpSettings:
+    """Local Aiven MCP server (mcp-aiven over stdio)."""
+    aiven_token: str = field(default_factory=lambda: _env("AIVEN_TOKEN"))
+    services_scope: str = field(default_factory=lambda: _env("AIVEN_SERVICES_SCOPE", "pg,kafka"))
+    cmd: str = field(default_factory=_default_mcp_cmd)
+    args: list[str] = field(default_factory=lambda: (_env("MCP_AIVEN_ARGS", "-y mcp-aiven")).split())
+    read_only: bool = field(default_factory=lambda: _env("AIVEN_READ_ONLY", "false").lower() == "true")
+
+    @property
+    def configured(self) -> bool:
+        return bool(self.aiven_token)
 
 
 @dataclass
 class Settings:
     anthropic_api_key: str = field(default_factory=lambda: _env("ANTHROPIC_API_KEY"))
     anthropic_base_url: str = field(default_factory=lambda: _env("ANTHROPIC_BASE_URL"))
-    kg_base_url: str = field(default_factory=lambda: _env("KG_BASE_URL", "http://localhost:8000"))
-    kg_stub: bool = field(default_factory=lambda: _env("KG_STUB", "false").lower() == "true")
+    model_smart: str = field(default_factory=lambda: _env("MODEL_SMART", "claude-opus-4-8"))
+    model_fast: str = field(default_factory=lambda: _env("MODEL_FAST", "claude-haiku-4-5"))
+    sessions_dir: str = field(default_factory=lambda: _env("SESSIONS_DIR", "./.sessions"))
+    max_concurrency: int = field(default_factory=lambda: _int("MAX_CONCURRENCY", 8))
+    consumer_group: str = field(default_factory=lambda: _env("CONSUMER_GROUP", "agent-runner"))
     kafka: KafkaSettings = field(default_factory=KafkaSettings)
+    mcp: McpSettings = field(default_factory=McpSettings)
 
 
 def load() -> Settings:
+    """Load settings, pulling a local .env first if python-dotenv is available."""
+    try:
+        from dotenv import load_dotenv  # optional, dev convenience
+        load_dotenv()
+    except Exception:
+        pass
     return Settings()

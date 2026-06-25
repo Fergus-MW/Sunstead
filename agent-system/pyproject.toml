@@ -1,20 +1,13 @@
 [project]
 name = "agent-system"
 version = "0.1.0"
-description = "Sunstead live-call agent subsystem"
-requires-python = ">=3.11"
-dependencies = ["shared"]
+description = "Sunstead agent suite — agent-runner container + shared contracts"
+requires-python = ">=3.10"
+dependencies = ["shared", "agent-runner"]
 
 [tool.uv.workspace]
-members = [
-    "shared",
-    "call-gateway",
-    "listener-agent",
-    "gateway",
-    "agents/web-agent",
-    "agents/data-agent",
-    "agents/git-agent",
-]
+members = ["shared", "agent-runner"]
 
 [tool.uv.sources]
 shared = { workspace = true }
+agent-runner = { workspace = true }

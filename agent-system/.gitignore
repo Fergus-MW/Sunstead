@@ -1,4 +1,5 @@
 .env
+.sessions/
 *.pem
 *.cert
 *.key

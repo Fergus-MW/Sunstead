@@ -1,0 +1,23 @@
+name: sunstead-agent-system
+
+# Local Kafka for development (single-node redpanda, Kafka-API compatible, PLAINTEXT).
+# Host apps connect on localhost:19092  ->  set KAFKA_BOOTSTRAP=localhost:19092 (the .env default).
+services:
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:v24.2.7
+    container_name: sunstead-redpanda
+    command:
+      - redpanda
+      - start
+      - --mode=dev-container
+      - --smp=1
+      - --default-log-level=warn
+      - --kafka-addr=PLAINTEXT://0.0.0.0:9092,EXTERNAL://0.0.0.0:19092
+      - --advertise-kafka-addr=PLAINTEXT://redpanda:9092,EXTERNAL://localhost:19092
+    ports:
+      - "19092:19092"
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -E 'Healthy:.*true'"]
+      interval: 5s
+      timeout: 5s
+      retries: 12

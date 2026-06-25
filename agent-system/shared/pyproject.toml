@@ -1,12 +1,12 @@
 [project]
 name = "shared"
 version = "0.1.0"
-description = "Shared contracts, kafka helpers, KG client, and config"
-requires-python = ">=3.11"
+description = "Shared contracts, Kafka helpers, Aiven MCP session, harness, and config"
+requires-python = ">=3.10"
 dependencies = [
     "pydantic>=2.7",
     "aiokafka>=0.11",
-    "httpx>=0.27",
+    "python-dotenv>=1.0",
 ]
 
 [build-system]
