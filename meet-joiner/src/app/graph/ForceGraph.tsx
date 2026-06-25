@@ -3,9 +3,12 @@
 import { useEffect, useMemo, useRef } from "react";
 import {
   colorFor,
+  degreeColor,
   edgeLabel,
+  MINIMAL_NODE_COLOR,
   shortLabel,
   typeLabel,
+  type Display,
   type GraphEdge,
   type GraphNode,
   type Subgraph,
@@ -23,12 +26,13 @@ type Props = {
   data: Subgraph;
   selectedId: string | null;
   hiddenTypes: Set<string>;
+  display: Display;
   onSelect: (node: GraphNode | null) => void;
 };
 
 // Self-contained canvas force-directed graph — no external deps.
 // Velocity-Verlet-ish integration: repulsion + link springs + centering gravity.
-export default function ForceGraph({ data, selectedId, hiddenTypes, onSelect }: Props) {
+export default function ForceGraph({ data, selectedId, hiddenTypes, display, onSelect }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const tipRef = useRef<HTMLDivElement | null>(null);
@@ -41,6 +45,8 @@ export default function ForceGraph({ data, selectedId, hiddenTypes, onSelect }: 
   // Frames left during which the camera auto-follows the settling layout.
   const settleRef = useRef(0);
   const hubDegRef = useRef(3);
+  const maxDegRef = useRef(1);
+  const displayRef = useRef<Display>(display);
 
   // Interaction state kept in refs so the rAF loop sees fresh values.
   const nodesRef = useRef<SimNode[]>([]);
@@ -66,7 +72,13 @@ export default function ForceGraph({ data, selectedId, hiddenTypes, onSelect }: 
     onSelectRef.current = onSelect;
     selectedRef.current = selectedId;
     hiddenRef.current = hiddenTypes;
-  }, [onSelect, selectedId, hiddenTypes]);
+    displayRef.current = display;
+  }, [onSelect, selectedId, hiddenTypes, display]);
+
+  // Re-frame when spacing or isolated-node visibility changes the layout extent.
+  useEffect(() => {
+    settleRef.current = Math.max(settleRef.current, 90);
+  }, [display.spacing, display.hideIsolated]);
 
   // Stable key so we only rebuild the simulation when the graph actually changes.
   const dataKey = useMemo(
@@ -84,6 +96,7 @@ export default function ForceGraph({ data, selectedId, hiddenTypes, onSelect }: 
     // Hubs (well-connected nodes) get persistent labels + emphasis so the
     // structure of the graph is legible even when zoomed out.
     const maxDeg = Math.max(1, ...deg.values());
+    maxDegRef.current = maxDeg;
     hubDegRef.current = Math.max(3, Math.ceil(maxDeg * 0.4));
     const prev = idxRef.current;
     const R = 240;
@@ -148,7 +161,17 @@ export default function ForceGraph({ data, selectedId, hiddenTypes, onSelect }: 
     // Connected nodes read larger; isolated ones recede so structure stands out.
     const radiusOf = (n: SimNode) =>
       n.deg === 0 ? 3.5 : 5 + Math.min(11, Math.sqrt(n.deg) * 2.4);
-    const visible = (n: SimNode) => !hiddenRef.current.has(n.type);
+    const visible = (n: SimNode) => {
+      if (hiddenRef.current.has(n.type)) return false;
+      if (displayRef.current.hideIsolated && n.deg === 0) return false;
+      return true;
+    };
+    const nodeColor = (n: SimNode) => {
+      const mode = displayRef.current.colorMode;
+      if (mode === "minimal") return MINIMAL_NODE_COLOR;
+      if (mode === "degree") return degreeColor(n.deg, maxDegRef.current);
+      return colorFor(n.type);
+    };
 
     const toWorld = (sx: number, sy: number) => ({
       x: (sx - view.current.offsetX) / view.current.scale,
@@ -224,10 +247,11 @@ export default function ForceGraph({ data, selectedId, hiddenTypes, onSelect }: 
       const nodes = nodesRef.current;
       const edges = edgesRef.current;
       const idx = idxRef.current;
-      const REP = 3600; // repulsion strength
+      const sp = displayRef.current.spacing || 1;
+      const REP = 3600 * sp * sp; // repulsion strength (spacing widens the cloud)
       const SPRING = 0.025; // link stiffness
-      const LEN = 84; // ideal link length
-      const CENTER = 0.028; // gravity toward origin — keeps the cloud compact
+      const LEN = 84 * sp; // ideal link length
+      const CENTER = 0.028 / sp; // gravity toward origin — keeps the cloud compact
       const DAMP = 0.82; // lower = energy bleeds off faster, settles sooner
 
       // Repulsion (O(n^2) — fine for node_limit <= 500).
@@ -335,6 +359,7 @@ export default function ForceGraph({ data, selectedId, hiddenTypes, onSelect }: 
 
       const nodes = nodesRef.current;
       const idx = idxRef.current;
+      const disp = displayRef.current;
       const hover = hoverRef.current;
       const selected = selectedRef.current;
       const focus = hover ?? selected;
@@ -362,18 +387,23 @@ export default function ForceGraph({ data, selectedId, hiddenTypes, onSelect }: 
         // Direction arrow — subtle by default, clear when the edge is lit.
         ctx.fillStyle = `rgba(243,234,211,${lit ? 0.7 : 0.22})`;
         drawArrow(s, t, radiusOf(t), 1);
-        // Relationship label on focused edges.
-        if (lit && scale > 0.4) {
-          ctx.globalAlpha = 1;
+        // Relationship labels — per the edge-label display mode.
+        const showEdgeLabel =
+          disp.edgeLabels !== "off" &&
+          (disp.edgeLabels === "all" ? scale > 0.55 : lit && scale > 0.4) &&
+          !(focus && disp.edgeLabels === "all" && !lit); // declutter: when focusing, only lit
+        if (showEdgeLabel) {
+          ctx.globalAlpha = lit ? 1 : 0.5;
           ctx.font = `${10 / scale}px ui-sans-serif, system-ui, sans-serif`;
           ctx.textAlign = "center";
           ctx.lineWidth = 3 / scale;
           ctx.strokeStyle = "rgba(11,26,23,0.9)";
-          ctx.fillStyle = "rgba(255,213,122,0.95)";
+          ctx.fillStyle = lit ? "rgba(255,213,122,0.95)" : "rgba(243,234,211,0.7)";
           const mx = (s.x + t.x) / 2;
           const my = (s.y + t.y) / 2 - 3 / scale;
           ctx.strokeText(edgeLabel(e.type), mx, my);
           ctx.fillText(edgeLabel(e.type), mx, my);
+          ctx.globalAlpha = 1;
         }
       }
 
@@ -390,7 +420,7 @@ export default function ForceGraph({ data, selectedId, hiddenTypes, onSelect }: 
         // Isolated nodes recede; connected ones stay full strength.
         const connAlpha = n.deg === 0 ? 0.5 : 1;
         const dim = (focus && !isFocus && !isAdj ? 0.18 : 1) * connAlpha;
-        const color = colorFor(n.type);
+        const color = nodeColor(n);
         ctx.globalAlpha = dim;
 
         // Soft glow behind hubs and the focused node so structure pops.
@@ -421,9 +451,14 @@ export default function ForceGraph({ data, selectedId, hiddenTypes, onSelect }: 
           ctx.stroke();
         }
 
-        // Persistent labels for hubs and the focused neighborhood; everything
-        // else labels only when zoomed in, to keep the canvas uncluttered.
-        if (isHub || isFocus || isAdj || scale > 0.95) {
+        // Label visibility follows the display mode: always / hubs+focus / off.
+        const showLabel =
+          disp.labels === "all"
+            ? true
+            : disp.labels === "off"
+              ? isFocus || isAdj
+              : isHub || isFocus || isAdj || scale > 0.95;
+        if (showLabel) {
           const fs = (isHub || isFocus ? 12 : 11) / scale;
           ctx.font = `${isHub ? 600 : 400} ${fs}px ui-sans-serif, system-ui, sans-serif`;
           ctx.globalAlpha = dim;

@@ -92,3 +92,41 @@ export function formatValue(value: unknown): string {
   if (typeof value === "number" || typeof value === "boolean") return String(value);
   return JSON.stringify(value);
 }
+
+// ── Display / view-mode settings ────────────────────────────────
+export type ColorMode = "type" | "degree" | "minimal";
+
+export type Display = {
+  colorMode: ColorMode; // how nodes are colored
+  labels: "hubs" | "all" | "off"; // which node labels to draw
+  edgeLabels: "focus" | "all" | "off"; // when to draw relationship labels
+  hideIsolated: boolean; // drop nodes with no edges
+  spacing: number; // layout spread multiplier (0.6–1.8)
+};
+
+export const DEFAULT_DISPLAY: Display = {
+  colorMode: "type",
+  labels: "hubs",
+  edgeLabels: "focus",
+  hideIsolated: false,
+  spacing: 1,
+};
+
+export const MINIMAL_NODE_COLOR = "#cdbf99";
+
+function hexToRgb(hex: string): [number, number, number] {
+  const h = hex.replace("#", "");
+  return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
+}
+
+// Cool (few links) → warm (hub) ramp for the connectivity color mode.
+const DEG_LOW = hexToRgb("#4a6f74");
+const DEG_HIGH = hexToRgb("#f78f3f");
+
+export function degreeColor(deg: number, maxDeg: number): string {
+  const t = Math.sqrt(Math.min(1, deg / Math.max(1, maxDeg)));
+  const r = Math.round(DEG_LOW[0] + (DEG_HIGH[0] - DEG_LOW[0]) * t);
+  const g = Math.round(DEG_LOW[1] + (DEG_HIGH[1] - DEG_LOW[1]) * t);
+  const b = Math.round(DEG_LOW[2] + (DEG_HIGH[2] - DEG_LOW[2]) * t);
+  return `rgb(${r},${g},${b})`;
+}

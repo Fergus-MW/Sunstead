@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { INTENT_TEMPLATES, INTENTS, type Intent } from "./types";
+import { INTENT_META, INTENT_TEMPLATES, INTENTS, type Intent } from "./types";
 
 type Sent =
   | { kind: "idle" }
@@ -29,6 +29,24 @@ export default function AskBox({ meetingId }: { meetingId: string }) {
     } catch {
       setSent({ kind: "error", message: "args is not valid JSON" });
       return;
+    }
+    // Guard the silent no-op: each non-echo intent reads its prompt from one key
+    // (question/brief). If that key is missing or blank, the agent falls back to a
+    // nonsense prompt and "completes" without doing what was asked — so reject it here.
+    const { promptKey } = INTENT_META[intent];
+    if (promptKey) {
+      const obj =
+        parsedArgs && typeof parsedArgs === "object" && !Array.isArray(parsedArgs)
+          ? (parsedArgs as Record<string, unknown>)
+          : {};
+      const v = obj[promptKey];
+      if (typeof v !== "string" || !v.trim()) {
+        setSent({
+          kind: "error",
+          message: `“${intent}” reads its prompt from "${promptKey}" — that field is empty. Put your request there.`,
+        });
+        return;
+      }
     }
     setSent({ kind: "sending" });
     try {
@@ -67,6 +85,9 @@ export default function AskBox({ meetingId }: { meetingId: string }) {
           </option>
         ))}
       </select>
+      <p className="text-[11px] leading-snug text-[#f3ead3]/45">
+        {INTENT_META[intent].blurb}
+      </p>
       <textarea
         value={args}
         onChange={(e) => setArgs(e.target.value)}

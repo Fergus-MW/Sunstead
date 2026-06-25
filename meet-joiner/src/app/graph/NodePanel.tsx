@@ -74,8 +74,10 @@ export default function NodePanel({ node, data, onSelectNode, onExpand, onClose 
         <dl className="space-y-1 border-t border-[#f3ead3]/10 pt-2 text-xs">
           {props.map(([k, v]) => (
             <div key={k} className="flex gap-2">
-              <dt className="w-24 shrink-0 text-[#f3ead3]/45">{humanizeKey(k)}</dt>
-              <dd className="break-words text-[#f3ead3]/85">{formatValue(v)}</dd>
+              <dt className="w-20 shrink-0 text-[#f3ead3]/45">{humanizeKey(k)}</dt>
+              <dd className="min-w-0 flex-1 break-words [overflow-wrap:anywhere] text-[#f3ead3]/85">
+                {formatValue(v)}
+              </dd>
             </div>
           ))}
           <button
@@ -107,19 +109,18 @@ export default function NodePanel({ node, data, onSelectNode, onExpand, onClose 
               <li key={r.edgeId}>
                 <button
                   onClick={() => onSelectNode(r.other)}
+                  title={`${r.dir === "out" ? "→" : "←"} ${r.rel} · ${r.other.name}`}
                   className="group flex w-full items-center gap-2 rounded px-1.5 py-1 text-left text-xs hover:bg-[#f3ead3]/10"
                 >
-                  <span className="text-[#f3ead3]/35" title={r.dir === "out" ? "outgoing" : "incoming"}>
-                    {r.dir === "out" ? "→" : "←"}
-                  </span>
-                  <span className="w-20 shrink-0 truncate text-[10px] italic text-[#f3ead3]/45">
+                  <span className="shrink-0 text-[#f3ead3]/35">{r.dir === "out" ? "→" : "←"}</span>
+                  <span className="w-16 shrink-0 truncate text-[10px] italic text-[#f3ead3]/45">
                     {r.rel}
                   </span>
                   <span
                     className="inline-block h-2 w-2 shrink-0 rounded-full"
                     style={{ background: colorFor(r.other.type) }}
                   />
-                  <span className="truncate text-[#f3ead3]/85 group-hover:text-[#f3ead3]">
+                  <span className="min-w-0 flex-1 truncate text-[#f3ead3]/85 group-hover:text-[#f3ead3]">
                     {r.other.name}
                   </span>
                 </button>

@@ -1,10 +1,18 @@
 "use client";
 
-import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import AppHeader from "../_components/AppHeader";
 import ForceGraph from "./ForceGraph";
 import NodePanel from "./NodePanel";
-import { colorFor, typeLabel, type GraphNode, type Subgraph } from "./types";
+import SettingsMenu from "./SettingsMenu";
+import {
+  colorFor,
+  DEFAULT_DISPLAY,
+  typeLabel,
+  type Display,
+  type GraphNode,
+  type Subgraph,
+} from "./types";
 
 type Load =
   | { kind: "idle" }
@@ -20,6 +28,7 @@ export default function GraphExplorer() {
   const [load, setLoad] = useState<Load>({ kind: "idle" });
   const [selected, setSelected] = useState<GraphNode | null>(null);
   const [hiddenTypes, setHiddenTypes] = useState<Set<string>>(new Set());
+  const [display, setDisplay] = useState<Display>(DEFAULT_DISPLAY);
 
   const loadOverview = useCallback(async () => {
     setLoad({ kind: "loading" });
@@ -37,8 +46,11 @@ export default function GraphExplorer() {
     }
   }, []);
 
-  // Land on a useful view instead of a blank canvas.
+  // Land on a useful view instead of a blank canvas. Fetch-on-mount: loadOverview
+  // sets loading state then awaits the API — an intended external-data sync, not a
+  // render-derived setState.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadOverview();
   }, [loadOverview]);
 
@@ -120,23 +132,14 @@ export default function GraphExplorer() {
 
   return (
     <main className="flex h-screen flex-col bg-[#0b1a17] text-[#f3ead3]">
-      {/* Header */}
-      <header className="flex items-center justify-between border-b border-[#f3ead3]/10 px-5 py-3">
-        <div className="flex items-baseline gap-3">
-          <h1 className="font-serif text-lg tracking-tight">Sunstead · Knowledge Graph</h1>
-          <span className="text-[10px] uppercase tracking-[0.35em] text-[#f3ead3]/40">
-            central-kg-api
-          </span>
-        </div>
-        <nav className="flex gap-4 text-xs text-[#f3ead3]/60">
-          <Link href="/dashboard" className="underline-offset-4 hover:text-[#f3ead3] hover:underline">
-            Dashboard
-          </Link>
-          <Link href="/" className="underline-offset-4 hover:text-[#f3ead3] hover:underline">
-            ← Meeting hall
-          </Link>
-        </nav>
-      </header>
+      <AppHeader
+        title="Sunstead · Knowledge Graph"
+        subtitle="central-kg-api"
+        nav={[
+          { href: "/dashboard", label: "Dashboard" },
+          { href: "/", label: "← Meeting hall" },
+        ]}
+      />
 
       <div className="flex min-h-0 flex-1">
         {/* Left rail */}
@@ -229,7 +232,7 @@ export default function GraphExplorer() {
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
                 <p className="text-[10px] uppercase tracking-[0.3em] text-[#f3ead3]/50">
-                  Types · click to filter
+                  {display.colorMode === "type" ? "Types · click to filter" : "Filter by type"}
                 </p>
                 {hiddenTypes.size > 0 && (
                   <button
@@ -262,6 +265,18 @@ export default function GraphExplorer() {
                   );
                 })}
               </ul>
+              {display.colorMode === "degree" && (
+                <div className="space-y-1 pt-1">
+                  <div
+                    className="h-1.5 w-full rounded-full"
+                    style={{ background: "linear-gradient(90deg, #4a6f74, #f78f3f)" }}
+                  />
+                  <div className="flex justify-between text-[10px] text-[#f3ead3]/40">
+                    <span>fewer links</span>
+                    <span>hub</span>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -279,6 +294,9 @@ export default function GraphExplorer() {
               "radial-gradient(ellipse 70% 70% at 50% 45%, rgba(247,143,63,0.06), rgba(11,26,23,0) 70%)",
           }}
         >
+          {load.kind === "ok" && data.nodes.length > 0 && (
+            <SettingsMenu display={display} onChange={setDisplay} />
+          )}
           {load.kind === "ok" && load.source === "overview" && data.nodes.length > 0 && (
             <div className="pointer-events-none absolute left-1/2 top-4 z-10 -translate-x-1/2 rounded-full border border-[#f3ead3]/10 bg-black/40 px-3 py-1 text-[11px] text-[#f3ead3]/55 backdrop-blur">
               Overview · the busiest hubs in your graph — search or click a node to dig in
@@ -304,6 +322,7 @@ export default function GraphExplorer() {
             data={data}
             selectedId={selected?.id ?? null}
             hiddenTypes={hiddenTypes}
+            display={display}
             onSelect={setSelected}
           />
         </section>

@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Meet Joiner",
-  description: "Dispatch an agent to a Google Meet",
+  title: "Sunstead",
+  description: "Send an envoy into a meeting; watch its agents work the knowledge graph.",
 };
 
 export default function RootLayout({
