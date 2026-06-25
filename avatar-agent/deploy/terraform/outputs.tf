@@ -1,6 +1,11 @@
 output "livekit_eip" {
-  description = "Point A records for livekit_domain and livekit_turn_domain at this IP."
+  description = "LiveKit server IP. With a custom domain, point its A record(s) here."
   value       = aws_eip.livekit.public_ip
+}
+
+output "livekit_hostname" {
+  description = "Effective LiveKit hostname (auto sslip.io unless you set livekit_domain)."
+  value       = local.livekit_domain_effective
 }
 
 output "livekit_ws_url" {
@@ -31,6 +36,16 @@ output "agent_ecr_repo" {
 output "dispatch_ecr_repo" {
   description = "Push the dispatch Lambda image here."
   value       = aws_ecr_repository.dispatch.repository_url
+}
+
+output "agent_image" {
+  description = "Full agent image (repo:tag) the Fargate service is running."
+  value       = "${aws_ecr_repository.agent.repository_url}:${local.agent_image_tag_effective}"
+}
+
+output "dispatch_image" {
+  description = "Full dispatch image (repo:tag) the Lambda is running."
+  value       = "${aws_ecr_repository.dispatch.repository_url}:${local.dispatch_image_tag_effective}"
 }
 
 output "ecs_cluster" {

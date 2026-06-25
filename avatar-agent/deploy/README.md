@@ -47,42 +47,44 @@ backend_url         = "https://central-kg-api.example.com"
 EOF
 ```
 
-## 2. First apply (creates ECR + everything else)
+## 2. Apply — builds, pushes, and rolls out in one command
 
 ```bash
 terraform init
 terraform apply
 ```
 
-The Fargate service and the dispatch Lambda will be **unhealthy until their
-images exist** — that's expected; we push them next, then redeploy. (If the
-Lambda errors on first apply because its image isn't pushed yet, push the image
-(step 3) and re-run `terraform apply`.)
+With `auto_build = true` (the default), `apply` **builds both container images
+from local source, pushes them to ECR tagged with a source-content hash, and
+rolls them out** — the agent task definition and the dispatch Lambda are wired to
+that hash, so changed code → new tag → automatic rollout. It also uploads
+`viewer/index.html` and invalidates CloudFront. Requires `docker` + the `aws`
+CLI on PATH (both already used elsewhere in this runbook).
 
-## 3. Build & push the two images
+Because the tag is a content hash, re-running `apply` with no code change is a
+no-op — the build provisioner only re-runs when the source actually changes. So
+**to ship a new version of the agent, just re-run `terraform apply`** (no manual
+docker/CLI steps, no `force-new-deployment`).
+
+<details>
+<summary>Manual build/push instead (auto_build = false)</summary>
+
+Set `auto_build = false` in `terraform.tfvars` to keep build/push out-of-band
+(e.g. in CI) and pin tags via `agent_image_tag` / `dispatch_image_tag`:
 
 ```bash
 ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
 REGION=$(terraform output -raw region 2>/dev/null || echo us-east-1)
 aws ecr get-login-password --region "$REGION" \
   | docker login --username AWS --password-stdin "$ACCOUNT.dkr.ecr.$REGION.amazonaws.com"
-
-# from the avatar-agent/ root (one level up):
-cd ..
-
-# agent worker (the existing Dockerfile)
+cd ..   # avatar-agent/ root
 AGENT_REPO=$(cd deploy/terraform && terraform output -raw agent_ecr_repo)
-docker build --platform linux/amd64 -t "$AGENT_REPO:latest" .
-docker push "$AGENT_REPO:latest"
-
-# dispatch Lambda
+docker build --platform linux/amd64 -t "$AGENT_REPO:latest" . && docker push "$AGENT_REPO:latest"
 DISPATCH_REPO=$(cd deploy/terraform && terraform output -raw dispatch_ecr_repo)
-docker build --platform linux/amd64 -f deploy/Dockerfile.lambda -t "$DISPATCH_REPO:latest" .
-docker push "$DISPATCH_REPO:latest"
-
-cd deploy/terraform
-terraform apply   # picks up the Lambda image; (re)creates the function cleanly
+docker build --platform linux/amd64 -f deploy/Dockerfile.lambda -t "$DISPATCH_REPO:latest" . && docker push "$DISPATCH_REPO:latest"
+cd deploy/terraform && terraform apply
 ```
+</details>
 
 ## 4. Populate secrets in SSM
 
@@ -118,6 +120,10 @@ automatically). Verify: `curl -I https://<livekit_domain>` returns a LiveKit 200
 
 ## 6. Upload the viewer
 
+Done automatically by `terraform apply` (uploads `viewer/index.html` and
+invalidates CloudFront whenever the file changes). Only needed manually with
+`auto_build = false`:
+
 ```bash
 BUCKET=$(terraform output -raw viewer_bucket)
 DIST=$(terraform output -raw viewer_distribution_id)
@@ -125,15 +131,11 @@ aws s3 cp ../../viewer/index.html "s3://$BUCKET/index.html" --content-type text/
 aws cloudfront create-invalidation --distribution-id "$DIST" --paths '/index.html'
 ```
 
-## 7. Roll out the agent + go
+## 7. Go
+
+The agent already rolled out as part of step 2. Send the avatar into a meeting:
 
 ```bash
-aws ecs update-service \
-  --cluster "$(terraform output -raw ecs_cluster)" \
-  --service "$(terraform output -raw agent_service)" \
-  --force-new-deployment
-
-# send the avatar into a meeting:
 curl -X POST "$(terraform output -raw dispatch_function_url)" \
   -H 'content-type: application/json' \
   -d '{"meeting_url":"https://meet.google.com/abc-defg-hij"}'
@@ -144,8 +146,9 @@ sends the bot in.
 
 ## Operating notes
 
-- **Redeploy the worker** after pushing a new image: step 7's `update-service`
-  (the service `ignore_changes` desired_count, so Terraform won't fight you).
+- **Redeploy the worker** after a code change: just `terraform apply` (auto_build
+  rebuilds, pushes, and rolls out on the content-hash tag). The service
+  `ignore_changes` desired_count, so Terraform won't fight a manual scale.
 - **Logs**: `aws logs tail /ecs/sunstead-avatar-agent --follow`. LiveKit logs:
   SSH the box, `docker compose -f /opt/livekit/docker-compose.yaml logs -f`.
 - **Call artifacts** (transcript + tool timeline) write to the task's ephemeral

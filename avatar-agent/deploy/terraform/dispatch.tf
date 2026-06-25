@@ -57,7 +57,7 @@ resource "aws_lambda_function" "dispatch" {
   function_name = "${var.name_prefix}-dispatch"
   role          = aws_iam_role.dispatch.arn
   package_type  = "Image"
-  image_uri     = "${aws_ecr_repository.dispatch.repository_url}:${var.dispatch_image_tag}"
+  image_uri     = "${aws_ecr_repository.dispatch.repository_url}:${local.dispatch_image_tag_effective}"
   timeout       = 30
   memory_size   = 256
 
@@ -76,10 +76,19 @@ resource "aws_lambda_function" "dispatch" {
   }
 
   # The image must exist in ECR before this applies cleanly — see README order.
-  depends_on = [aws_ecr_repository.dispatch]
+  depends_on = [aws_ecr_repository.dispatch, terraform_data.dispatch_build]
 }
 
 resource "aws_lambda_function_url" "dispatch" {
   function_name      = aws_lambda_function.dispatch.function_name
   authorization_type = "NONE" # public; front-end calls it directly. See README to lock down.
+}
+
+# A Function URL with auth NONE still needs an explicit public-invoke permission.
+resource "aws_lambda_permission" "dispatch_url" {
+  statement_id           = "AllowPublicFunctionUrlInvoke"
+  action                 = "lambda:InvokeFunctionUrl"
+  function_name          = aws_lambda_function.dispatch.function_name
+  principal              = "*"
+  function_url_auth_type = "NONE"
 }

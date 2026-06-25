@@ -84,15 +84,32 @@ resource "aws_security_group_rule" "livekit_ssh" {
   security_group_id = aws_security_group.livekit.id
 }
 
+# Allocate the EIP first (independent of the instance) so its IP is known before
+# we render user_data. Breaks the would-be cycle: EIP → domain → user_data →
+# instance, with the association applied separately afterwards.
+resource "aws_eip" "livekit" {
+  domain = "vpc"
+  tags   = { Name = "${var.name_prefix}-livekit" }
+}
+
 locals {
+  # Blank domain → sslip.io hostname derived from the EIP (1-2-3-4.sslip.io).
+  livekit_domain_effective = (
+    var.livekit_domain != "" ? var.livekit_domain :
+    "${replace(aws_eip.livekit.public_ip, ".", "-")}.sslip.io"
+  )
+  turn_domain_effective = (
+    var.livekit_turn_domain != "" ? var.livekit_turn_domain : local.livekit_domain_effective
+  )
+
   livekit_yaml = templatefile("${path.module}/templates/livekit.yaml.tftpl", {
     api_key     = aws_ssm_parameter.livekit_api_key.value
     api_secret  = aws_ssm_parameter.livekit_api_secret.value
-    turn_domain = var.livekit_turn_domain
+    turn_domain = local.turn_domain_effective
   })
 
   caddyfile = templatefile("${path.module}/templates/Caddyfile.tftpl", {
-    livekit_domain = var.livekit_domain
+    livekit_domain = local.livekit_domain_effective
     acme_email     = var.acme_email
   })
 
@@ -103,9 +120,11 @@ locals {
 }
 
 resource "aws_instance" "livekit" {
-  ami                    = data.aws_ami.al2023.id
-  instance_type          = var.livekit_instance_type
-  subnet_id              = aws_subnet.public[0].id
+  ami           = data.aws_ami.al2023.id
+  instance_type = var.livekit_instance_type
+  # AZ-pinned: c7i-flex.large isn't offered in eu-central-1a, so use the 2nd
+  # subnet (eu-central-1b). The agent Fargate tasks still span both subnets.
+  subnet_id              = aws_subnet.public[1].id
   vpc_security_group_ids = [aws_security_group.livekit.id]
   key_name               = var.ssh_key_name == "" ? null : var.ssh_key_name
   user_data              = local.livekit_user_data
@@ -121,13 +140,12 @@ resource "aws_instance" "livekit" {
   tags = { Name = "${var.name_prefix}-livekit" }
 }
 
-resource "aws_eip" "livekit" {
-  instance = aws_instance.livekit.id
-  domain   = "vpc"
-  tags     = { Name = "${var.name_prefix}-livekit" }
+resource "aws_eip_association" "livekit" {
+  instance_id   = aws_instance.livekit.id
+  allocation_id = aws_eip.livekit.id
 }
 
 locals {
   # The agent worker, viewer, and dispatch Lambda all use this URL.
-  livekit_ws_url = "wss://${var.livekit_domain}"
+  livekit_ws_url = "wss://${local.livekit_domain_effective}"
 }

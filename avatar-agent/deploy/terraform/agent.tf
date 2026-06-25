@@ -79,7 +79,7 @@ resource "aws_iam_role" "agent_task" {
 # ── Security group: egress only ──
 resource "aws_security_group" "agent" {
   name        = "${var.name_prefix}-agent"
-  description = "Agent worker — egress only"
+  description = "Agent worker - egress only"
   vpc_id      = aws_vpc.main.id
 
   egress {
@@ -105,7 +105,7 @@ resource "aws_ecs_task_definition" "agent" {
   container_definitions = jsonencode([
     {
       name      = "agent"
-      image     = "${aws_ecr_repository.agent.repository_url}:${var.agent_image_tag}"
+      image     = "${aws_ecr_repository.agent.repository_url}:${local.agent_image_tag_effective}"
       essential = true
 
       environment = [
@@ -143,6 +143,9 @@ resource "aws_ecs_task_definition" "agent" {
       }
     }
   ])
+
+  # Ensure the image for this tag is in ECR before registering the task def.
+  depends_on = [terraform_data.agent_build]
 }
 
 resource "aws_ecs_service" "agent" {

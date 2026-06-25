@@ -10,23 +10,21 @@ variable "name_prefix" {
   default     = "sunstead-avatar"
 }
 
-# ── DNS (self-hosted LiveKit needs TLS, which needs a real domain) ──
+# ── DNS (self-hosted LiveKit needs TLS, which needs a hostname) ──
+# Leave both blank to auto-derive a hostname from the Elastic IP via sslip.io
+# (e.g. 1-2-3-4.sslip.io) — Caddy still gets a real Let's Encrypt cert, with zero
+# DNS setup. Set them to use your own domain instead (more robust; no shared-
+# domain cert rate limits) and point A records at the livekit_eip output.
 variable "livekit_domain" {
-  description = <<-EOT
-    Fully-qualified domain for the LiveKit signaling endpoint, e.g.
-    "livekit.sunstead.example.com". You must point an A record at the EIP this
-    stack outputs (livekit_eip). Caddy on the instance auto-issues a Let's
-    Encrypt cert for it, giving wss://<domain>.
-  EOT
+  description = "LiveKit signaling FQDN, e.g. livekit.example.com. Blank = auto sslip.io from the EIP."
   type        = string
+  default     = ""
 }
 
 variable "livekit_turn_domain" {
-  description = <<-EOT
-    Domain for the embedded TURN/TLS server, e.g. "turn.sunstead.example.com".
-    Point an A record at the same EIP. Used by clients on restrictive networks.
-  EOT
+  description = "TURN FQDN, e.g. turn.example.com. Blank = reuse the signaling hostname."
   type        = string
+  default     = ""
 }
 
 variable "acme_email" {
@@ -54,8 +52,20 @@ variable "ssh_key_name" {
 }
 
 # ── Fargate agent worker ──
+variable "auto_build" {
+  description = <<-EOT
+    When true (default), `terraform apply` builds the agent + dispatch images
+    from local source, pushes them to ECR tagged with a content hash, and rolls
+    them out — one command deploys the latest code. Needs docker + aws CLI on
+    PATH. Set false to keep the manual build/push flow and pin the *_image_tag
+    variables yourself.
+  EOT
+  type        = bool
+  default     = true
+}
+
 variable "agent_image_tag" {
-  description = "Image tag the Fargate service runs (push to the ECR repo this stack creates)."
+  description = "Image tag the Fargate service runs when auto_build=false (push it yourself)."
   type        = string
   default     = "latest"
 }

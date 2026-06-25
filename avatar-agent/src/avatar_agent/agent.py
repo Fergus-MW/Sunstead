@@ -23,7 +23,8 @@ from livekit.agents import (
     cli,
     metrics,
 )
-from livekit.plugins import anam
+from livekit.plugins import anam, anthropic, cartesia, deepgram, openai, silero
+from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
 from .backend import BackendClient
 from .config import Settings, settings
@@ -54,8 +55,6 @@ _VAD = None
 def _get_vad():
     global _VAD
     if _VAD is None:
-        from livekit.plugins import silero
-
         _VAD = silero.VAD.load()
     return _VAD
 
@@ -69,8 +68,6 @@ def build_session(cfg: Settings, runtime: AgentRuntime) -> AgentSession[AgentRun
     if cfg.pipeline_mode == "realtime":
         # Single speech-to-speech model: lowest latency, one API key, but no
         # per-leg latency breakdown.
-        from livekit.plugins import openai
-
         return AgentSession(
             userdata=runtime,
             llm=openai.realtime.RealtimeModel(voice=cfg.realtime_voice),
@@ -78,9 +75,6 @@ def build_session(cfg: Settings, runtime: AgentRuntime) -> AgentSession[AgentRun
 
     # Cascade: streaming STT → Anthropic LLM (tool calling) → streaming TTS, with
     # VAD + a turn detector for natural turn-taking and barge-in (CV-3).
-    from livekit.plugins import anthropic, cartesia, deepgram
-    from livekit.plugins.turn_detector.multilingual import MultilingualModel
-
     tts_kwargs = {"voice": cfg.tts_voice} if cfg.tts_voice else {}
     return AgentSession(
         userdata=runtime,
@@ -128,14 +122,20 @@ async def entrypoint(ctx: JobContext) -> None:
     # ── Avatar: render a real-time lip-synced face into the room. When an avatar
     # session is attached, the agent's audio is routed to the avatar worker (which
     # publishes synced audio+video) rather than straight to the room. ──
-    avatar = anam.AvatarSession(
-        persona_config=anam.PersonaConfig(
-            name=cfg.anam_avatar_name,
-            avatarId=cfg.anam_avatar_id,
-        ),
-        api_key=cfg.anam_api_key,
-    )
-    await avatar.start(session, room=ctx.room)
+    # In console mode (`avatar-agent console`) there's no rendered avatar and the
+    # agent talks to your local mic/speakers, so skip the avatar — otherwise it
+    # would swallow the agent's audio and you'd hear nothing.
+    if ctx.room.name == "console":
+        logger.info("console mode: skipping Anam avatar, routing audio locally")
+    else:
+        avatar = anam.AvatarSession(
+            persona_config=anam.PersonaConfig(
+                name=cfg.anam_avatar_name,
+                avatarId=cfg.anam_avatar_id,
+            ),
+            api_key=cfg.anam_api_key,
+        )
+        await avatar.start(session, room=ctx.room)
 
     await session.start(
         agent=Agent(instructions=INSTRUCTIONS, tools=BACKEND_TOOLS),

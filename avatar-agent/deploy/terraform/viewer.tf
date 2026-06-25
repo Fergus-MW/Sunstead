@@ -83,3 +83,22 @@ locals {
   # dispatch.py appends ?lk=…&token=… to this when creating the Recall bot.
   viewer_url = "https://${aws_cloudfront_distribution.viewer.domain_name}/index.html"
 }
+
+# Upload viewer/index.html as part of `terraform apply` — the etag tracks the
+# file so a changed page re-uploads and triggers a CloudFront invalidation.
+resource "aws_s3_object" "viewer_index" {
+  bucket       = aws_s3_bucket.viewer.id
+  key          = "index.html"
+  source       = "${local.repo_root}/viewer/index.html"
+  content_type = "text/html"
+  etag         = filemd5("${local.repo_root}/viewer/index.html")
+}
+
+# CloudFront caches index.html; bust it whenever the uploaded object changes.
+resource "terraform_data" "viewer_invalidate" {
+  triggers_replace = aws_s3_object.viewer_index.etag
+
+  provisioner "local-exec" {
+    command = "aws cloudfront create-invalidation --distribution-id ${aws_cloudfront_distribution.viewer.id} --paths '/index.html'"
+  }
+}
