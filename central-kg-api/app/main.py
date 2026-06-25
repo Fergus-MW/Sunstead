@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi import FastAPI
@@ -14,7 +15,9 @@ from .config import get_settings
 from .db import engine
 from .routers import entity, extract, ingest, link, query, search, subgraph, timeline, update
 
-load_dotenv()
+# Load THIS service's own .env (central-kg-api/.env), not whatever happens to be
+# in the launch cwd. Real env vars still win (load_dotenv never overrides them).
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"))
 
 

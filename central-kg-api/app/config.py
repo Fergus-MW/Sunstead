@@ -1,11 +1,20 @@
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Anchor the .env to THIS service's own folder (central-kg-api/.env) so config
+# loads no matter what cwd the process starts from — uvicorn, pytest, the repo
+# root, or Docker. Previously `env_file=".env"` was cwd-relative and silently
+# missed the file whenever the process wasn't launched from central-kg-api/.
+_ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
+
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=str(_ENV_FILE), env_file_encoding="utf-8", extra="ignore"
+    )
 
     database_url: str = Field(
         default="postgresql+asyncpg://kg:kg@localhost:5432/kg",
