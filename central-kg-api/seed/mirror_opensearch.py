@@ -52,6 +52,12 @@ INDEX_MAPPING = {
                 "analyzer": "code_text",
                 "fields": {"raw": {"type": "keyword"}},
             },
+            # Free-text bag from utterances, decisions, etc. — the actual
+            # body of the node, not just its name.
+            "text": {"type": "text", "analyzer": "code_text"},
+            "speaker": {"type": "keyword"},
+            "meeting_id": {"type": "keyword"},
+            "occurred_at": {"type": "date"},
             "community": {"type": "integer"},
             "source_id": {"type": "keyword"},
             "graphify_id": {"type": "keyword"},
@@ -80,16 +86,31 @@ def _bulk_actions(rows: list[dict], index: str) -> str:
     for r in rows:
         raw_props = r["properties"]
         props = json.loads(raw_props) if isinstance(raw_props, str) else (raw_props or {})
+        # Utterances carry their dialogue in properties.text; commits carry
+        # the commit subject; decisions / topics fall back to the node name.
+        text_parts: list[str] = []
+        if props.get("text"):
+            text_parts.append(str(props["text"]))
+        if props.get("subject"):
+            text_parts.append(str(props["subject"]))
+        if props.get("title") and props["title"] != r["name"]:
+            text_parts.append(str(props["title"]))
         doc = {
             "type": r["type"],
             "name": r["name"],
             "label": props.get("label") or r["name"],
             "source_file": props.get("source_file"),
+            "text": " ".join(text_parts) or None,
+            "speaker": props.get("speaker"),
+            "meeting_id": props.get("meeting_id"),
+            "occurred_at": props.get("occurred_at"),
             "community": props.get("community"),
             "source_id": str(r["source_id"]) if r["source_id"] else None,
             "graphify_id": props.get("graphify_id"),
             "graphify_file_type": props.get("graphify_file_type"),
         }
+        # Drop None values so OpenSearch doesn't store a wall of nulls.
+        doc = {k: v for k, v in doc.items() if v is not None}
         out.append(json.dumps({"index": {"_id": str(r["id"])}}))
         out.append(json.dumps(doc, default=str))
     return "\n".join(out) + "\n"
