@@ -23,7 +23,8 @@ export type Subgraph = {
   edges: GraphEdge[];
 };
 
-// Node-type vocab from app/models.py → a palette tuned to the Sunstead theme.
+// Node-type vocab mirrors the canonical schema (agent-system shared/schema.py, via app/models.py)
+// → a palette tuned to the Sunstead theme. Keep in sync when the vocab changes.
 export const NODE_COLORS: Record<string, string> = {
   person: "#ffd57a",
   company: "#f78f3f",
@@ -38,6 +39,13 @@ export const NODE_COLORS: Record<string, string> = {
   source_document: "#8a99a8",
   topic: "#d98ae0",
   decision: "#e06f6f",
+  // grown live by the agent suite (commits, meeting episodes, web findings, integrations)
+  commit: "#b5c98a",
+  website: "#5fb0d9",
+  policy: "#caa6f0",
+  utterance: "#cdd6e0",
+  action_item: "#8fd49a",
+  research_finding: "#e0b066",
 };
 
 export const FALLBACK_COLOR = "#bcae8a";
@@ -63,6 +71,13 @@ export const EDGE_LABELS: Record<string, string> = {
   mentions: "mentions",
   part_of: "part of",
   owns: "owns",
+  // edges grown by the seed + agent suite
+  authored: "authored",
+  touches: "touches",
+  in_meeting: "in meeting",
+  said: "said",
+  attended: "attended",
+  rationale_for: "rationale for",
 };
 
 export function edgeLabel(type: string): string {
