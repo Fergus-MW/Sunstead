@@ -517,6 +517,43 @@ function FeedChainView({ chain, now }: { chain: FeedChain; now: number }) {
 // One agent card. Memoized so a streamed trace delta only re-renders the card whose
 // `trace` prop actually changed — without this, every token re-rendered all cards.
 // `now` ticks every 2s (relative-time refresh); that's a cheap, infrequent re-render.
+function compactText(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function CompactSummary({ row }: { row: TaskRow }) {
+  const artifact = row.artifacts[0];
+  const answer = typeof row.result?.answer === "string" ? compactText(row.result.answer) : "";
+  if (!artifact && !answer && !row.error) return null;
+
+  return (
+    <div className="mt-2 space-y-1.5 rounded border border-[#f3ead3]/10 bg-black/20 p-2">
+      {artifact &&
+        (artifact.kind === "url" || artifact.kind === "image" ? (
+          <a
+            href={artifact.value}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex max-w-full items-center gap-1 truncate rounded-full border border-sky-300/30 bg-sky-900/20 px-2 py-0.5 text-[11px] text-sky-200 hover:border-sky-300/60 hover:text-sky-100"
+          >
+            {artifact.kind === "image" ? "image artifact" : "url artifact"}:{" "}
+            {artifact.value.replace(/^https?:\/\//, "")}
+          </a>
+        ) : (
+          <span className="inline-flex max-w-full truncate rounded-full border border-[#f3ead3]/15 px-2 py-0.5 text-[11px] text-[#f3ead3]/65">
+            {artifact.kind}: {artifact.value}
+          </span>
+        ))}
+      {answer && (
+        <p className="max-h-10 overflow-hidden text-[11px] leading-snug text-[#f3ead3]/55">
+          {answer}
+        </p>
+      )}
+      {row.error && <p className="text-[11px] leading-snug text-rose-200/80">{row.error}</p>}
+    </div>
+  );
+}
+
 const TaskCard = memo(function TaskCard({
   row,
   trace,
@@ -534,9 +571,13 @@ const TaskCard = memo(function TaskCard({
   onToggle: (taskId: string) => void;
   onStop: (taskId: string) => void;
 }) {
+  const stalled = !row.terminal && liveAgeMs(row.lastTs, trace?.ts ?? 0, now) > STUCK_MS;
+
   return (
     <div
-      className="rounded-lg border border-[#f3ead3]/12 bg-black/25 p-3 transition-colors hover:border-[#f3ead3]/25"
+      className={`rounded-lg border border-[#f3ead3]/12 bg-black/25 p-3 transition-colors hover:border-[#f3ead3]/25 ${
+        expanded ? "md:col-span-full" : ""
+      }`}
       style={{ borderLeft: `3px solid ${accentFor(row)}` }}
     >
       <button
@@ -561,6 +602,8 @@ const TaskCard = memo(function TaskCard({
       </button>
 
       {row.detail && <p className="mt-1.5 text-xs text-[#f3ead3]/60">{row.detail}</p>}
+
+      {!expanded && <CompactSummary row={row} />}
 
       {expanded && (
         <>
@@ -595,7 +638,7 @@ const TaskCard = memo(function TaskCard({
                 rel="noreferrer"
                 className="inline-flex max-w-full items-center gap-1 truncate rounded-full border border-sky-300/30 bg-sky-900/20 px-2 py-0.5 text-xs text-sky-200 hover:border-sky-300/60 hover:text-sky-100"
               >
-                ↗ {a.value.replace(/^https?:\/\//, "")}
+                open {a.value.replace(/^https?:\/\//, "")}
               </a>
             ) : (
               <span
@@ -619,9 +662,7 @@ const TaskCard = memo(function TaskCard({
         </span>
         {!row.terminal && (
           <span className="ml-auto flex items-center gap-1.5">
-            {liveAgeMs(row.lastTs, trace?.ts ?? 0, now) > STUCK_MS && (
-              <span className="rounded-full bg-rose-900/30 px-1.5 text-rose-300">stalled</span>
-            )}
+            {stalled && <span className="rounded-full bg-rose-900/30 px-1.5 text-rose-300">stalled</span>}
             <button
               onClick={() => onStop(row.taskId)}
               disabled={isStopping}
@@ -629,7 +670,7 @@ const TaskCard = memo(function TaskCard({
               title="Cancel this task"
               className="rounded-full border border-rose-300/30 px-2 py-0.5 text-rose-200/80 hover:border-rose-300/60 hover:text-rose-100 disabled:opacity-40"
             >
-              {isStopping ? "stopping…" : "■ stop"}
+              {isStopping ? "stopping..." : "stop"}
             </button>
           </span>
         )}
@@ -643,7 +684,7 @@ export default function Dashboard() {
   // A 2s tick so relative times and "stuck" status stay live even when no events arrive.
   const [now, setNow] = useState(() => Date.now());
   const [filter, setFilter] = useState<TaskFilter>("all");
-  const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);
+  const [expandedTaskIds, setExpandedTaskIds] = useState<Set<string>>(() => new Set());
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 2000);
     return () => clearInterval(id);
@@ -689,8 +730,27 @@ export default function Dashboard() {
     setFilter((current) => (current === next ? "all" : next));
   }, []);
   const toggleTask = useCallback((taskId: string) => {
-    setExpandedTaskId((current) => (current === taskId ? null : taskId));
+    setExpandedTaskIds((current) => {
+      const next = new Set(current);
+      if (next.has(taskId)) next.delete(taskId);
+      else next.add(taskId);
+      return next;
+    });
   }, []);
+  const expandVisibleTasks = useCallback(() => {
+    setExpandedTaskIds(new Set(filteredTasks.map((task) => task.taskId)));
+  }, [filteredTasks]);
+  const collapseVisibleTasks = useCallback(() => {
+    setExpandedTaskIds((current) => {
+      const next = new Set(current);
+      for (const task of filteredTasks) next.delete(task.taskId);
+      return next;
+    });
+  }, [filteredTasks]);
+  const expandedVisibleCount = useMemo(
+    () => filteredTasks.filter((task) => expandedTaskIds.has(task.taskId)).length,
+    [filteredTasks, expandedTaskIds],
+  );
 
   // Operator stop (docs/DESIGN.md §7): POST to the control channel; the cancelled result
   // arrives back over the WS like any other terminal state. Optimistically disable the button.
@@ -747,7 +807,7 @@ export default function Dashboard() {
       />
 
       {/* Digest bar — filter + the conductor's-eye fleet glance */}
-      <div className="flex items-center gap-4 border-b border-[#f3ead3]/10 bg-black/20 px-4 py-2.5">
+      <div className="flex flex-wrap items-center gap-4 border-b border-[#f3ead3]/10 bg-black/20 px-4 py-2.5">
         <div className="flex items-center gap-2">
           <label className="text-[9px] uppercase tracking-[0.25em] text-[#f3ead3]/40">Meeting</label>
           <input
@@ -757,7 +817,7 @@ export default function Dashboard() {
             className="w-40 rounded-md border border-[#f3ead3]/15 bg-black/40 px-2.5 py-1 text-xs outline-none placeholder:text-[#f3ead3]/25 focus:border-[#f3ead3]/50"
           />
         </div>
-        <div className="ml-auto flex items-stretch divide-x divide-[#f3ead3]/10">
+        <div className="ml-auto flex max-w-full items-stretch overflow-x-auto divide-x divide-[#f3ead3]/10">
           <Stat label="all" value={tasks.length} tone={filter === "all" ? "default" : "muted"} selected={filter === "all"} onClick={() => setFilter("all")} />
           <Stat label="active" value={digest.active} tone={digest.active ? "active" : "muted"} selected={filter === "active"} onClick={() => selectFilter("active")} />
           <Stat label="stuck" value={digest.stuck} tone={digest.stuck ? "bad" : "muted"} pulse selected={filter === "stuck"} onClick={() => selectFilter("stuck")} />
@@ -776,7 +836,7 @@ export default function Dashboard() {
         </div>
       )}
 
-      <div className="flex min-h-0 flex-1">
+      <div className="flex min-h-0 flex-1 flex-col xl:flex-row">
         {/* Agent board — the centerpiece */}
         <section className="flex min-w-0 flex-1 flex-col">
           <div className="flex items-center justify-between gap-3 border-b border-[#f3ead3]/10 px-4 py-2">
@@ -786,15 +846,26 @@ export default function Dashboard() {
                 ({filter === "all" ? tasks.length : `${filteredTasks.length}/${tasks.length}`})
               </span>
             </h2>
-            {filter !== "all" && (
-              <button
-                type="button"
-                onClick={() => setFilter("all")}
-                className="rounded border border-[#f3ead3]/15 px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-[#f3ead3]/55 hover:border-[#f3ead3]/40 hover:text-[#f3ead3]"
-              >
-                {FILTER_LABEL[filter]} x
-              </button>
-            )}
+            <div className="flex items-center gap-1.5">
+              {filteredTasks.length > 0 && (
+                <button
+                  type="button"
+                  onClick={expandedVisibleCount === filteredTasks.length ? collapseVisibleTasks : expandVisibleTasks}
+                  className="rounded border border-[#f3ead3]/15 px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-[#f3ead3]/55 hover:border-[#f3ead3]/40 hover:text-[#f3ead3]"
+                >
+                  {expandedVisibleCount === filteredTasks.length ? "collapse all" : "expand all"}
+                </button>
+              )}
+              {filter !== "all" && (
+                <button
+                  type="button"
+                  onClick={() => setFilter("all")}
+                  className="rounded border border-[#f3ead3]/15 px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-[#f3ead3]/55 hover:border-[#f3ead3]/40 hover:text-[#f3ead3]"
+                >
+                  {FILTER_LABEL[filter]} x
+                </button>
+              )}
+            </div>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto p-3">
             {tasks.length === 0 ? (
@@ -806,7 +877,7 @@ export default function Dashboard() {
                 No {FILTER_LABEL[filter]} agents match this view.
               </p>
             ) : (
-              <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(340px,1fr))]">
+              <div className="grid items-start gap-3 [grid-template-columns:repeat(auto-fill,minmax(340px,1fr))]">
                 {filteredTasks.map((row) => (
                   <TaskCard
                     key={row.taskId}
@@ -814,7 +885,7 @@ export default function Dashboard() {
                     trace={traces[row.taskId]}
                     now={now}
                     isStopping={stopping.has(row.taskId)}
-                    expanded={expandedTaskId === row.taskId}
+                    expanded={expandedTaskIds.has(row.taskId)}
                     onToggle={toggleTask}
                     onStop={stop}
                   />
@@ -825,7 +896,7 @@ export default function Dashboard() {
         </section>
 
         {/* Right rail: dispatch + raw feed */}
-        <aside className="flex w-96 shrink-0 flex-col border-l border-[#f3ead3]/10">
+        <aside className="flex min-h-72 w-full shrink-0 flex-col border-t border-[#f3ead3]/10 xl:min-h-0 xl:w-96 xl:border-l xl:border-t-0">
           <div className="border-b border-[#f3ead3]/10 p-4">
             <AskBox meetingId={meetingId || DEFAULT_MEETING_ID} />
           </div>

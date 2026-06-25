@@ -5,6 +5,31 @@
 
 ---
 
+## 2026-06-25 - Repaired mission-control task focus UX after live review
+
+**What:** fixed the dashboard interaction regression from the first focus pass. Task cards now expand independently
+instead of forcing a single open card, and the Agents header can expand/collapse the current filtered set. Expanded
+cards span the task grid row for readable long answers, while the grid uses `items-start` so collapsed cards no longer
+stretch into empty slabs beside a tall expanded card. Collapsed cards now surface the first artifact/result/error
+summary so completed work is visible without opening the card. The digest strip wraps/scrolls horizontally under
+pressure, and the dispatch/live-feed rail moves below the board on narrower viewports instead of squeezing the task
+grid.
+
+**Why:** the screenshot made the defect obvious: one expanded answer made the other cards look broken and hollow, and
+the single-open-card model fought normal card affordances. Mission control needs both scan mode and comparison mode:
+operators should be able to keep several tasks open, compare outputs, and still see useful summaries when cards stay
+collapsed.
+
+**Analysis / consequences:** this remains a front-end-only layout/state change; task derivation, digest counts, and
+gateway contracts are unchanged. Verified with `npm.cmd run lint`, `npm.cmd run build`, and a local `/dashboard` 200
+response.
+
+**Touches:** `meet-joiner/src/app/dashboard/page.tsx`, `docs/LOG.md`.
+
+- Codex (GPT-5), signed off
+
+---
+
 ## 2026-06-25 - Made mission control operator-friendly: prompt-first dispatch + focused task views
 
 **What:** changed the dashboard from a JSON-first operator surface into a plain prompt flow. The ask box now defaults
