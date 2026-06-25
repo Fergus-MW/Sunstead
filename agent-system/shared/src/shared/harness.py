@@ -15,7 +15,9 @@ from datetime import datetime, timezone
 from typing import Awaitable, Callable
 
 from . import config
-from .contracts import ActivityPayload, Artifact, Envelope, TaskCreatePayload, TaskResultPayload
+from .contracts import (
+    ActivityPayload, Artifact, Envelope, TaskCreatePayload, TaskResultPayload, TracePayload,
+)
 from .kafka import publish
 from .sessions import SessionStore
 
@@ -42,6 +44,13 @@ class AgentContext:
         )
         await publish(self.producer, config.ACTIVITY, env, key=task_id)
 
+    async def _trace(self, meeting_id: str, task_id: str, seq: int, phase: str, delta: str) -> None:
+        env = Envelope[TracePayload](
+            type="trace", meeting_id=meeting_id, ts=now_iso(),
+            payload=TracePayload(task_id=task_id, seq=seq, phase=phase, delta=delta),
+        )
+        await publish(self.producer, config.TRACE, env, key=task_id)  # key=task_id → per-task order
+
     async def _emit_result(self, meeting_id: str, reply_to: str, payload: TaskResultPayload) -> None:
         env = Envelope[TaskResultPayload](
             type="task.completed" if payload.status == "completed" else "task.failed",
@@ -61,9 +70,17 @@ class TaskCtx:
         self.mcp = base.mcp
         self.anthropic = base.anthropic
         self.store = base.store
+        self._trace_seq = 0                     # monotonic per task → FE applies deltas in order
 
     async def activity(self, status: str, detail: str | None = None) -> None:
         await self._base._activity(self.meeting_id, self.task_id, status, detail)
+
+    async def trace(self, phase: str, delta: str) -> None:
+        """Emit one reasoning ('thinking') or output ('text') delta to agent.trace."""
+        if not delta:
+            return
+        self._trace_seq += 1
+        await self._base._trace(self.meeting_id, self.task_id, self._trace_seq, phase, delta)
 
 
 AgentFn = Callable[[TaskCreatePayload, TaskCtx], Awaitable[dict]]

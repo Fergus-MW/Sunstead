@@ -21,6 +21,7 @@ TASKS_GIT = "agent.tasks.git"
 TASKS_DEV = "agent.tasks.dev"        # dev/echo (no creds)
 RESULTS = "agent.results"
 ACTIVITY = "agent.activity"          # visible status feed to the FE
+TRACE = "agent.trace"                # streamed reasoning/output deltas to the FE
 KG_UPDATES = "kg.updates"
 
 # topics our agent-runner CONSUMES
@@ -30,7 +31,7 @@ TASK_TOPICS: list[str] = [TASKS_WEB, TASKS_DATA, TASKS_GIT, TASKS_DEV]
 ALL_TOPICS: list[str] = [
     TRANSCRIPT, MEETING_EVENTS,
     TASKS_WEB, TASKS_DATA, TASKS_GIT, TASKS_DEV,
-    RESULTS, ACTIVITY, KG_UPDATES,
+    RESULTS, ACTIVITY, TRACE, KG_UPDATES,
 ]
 
 # intent -> the task topic a producer should publish to
@@ -39,6 +40,7 @@ TASK_TOPIC_BY_INTENT = {
     "build_website": TASKS_WEB, "update_website": TASKS_WEB,
     "analyze": TASKS_DATA, "summarize_metrics": TASKS_DATA, "query_data": TASKS_DATA,
     "read_git": TASKS_GIT, "blame": TASKS_GIT, "who_changed": TASKS_GIT, "recent_changes": TASKS_GIT,
+    "ask": TASKS_GIT,    # general KG question -> same agent/topic as git (the agent is general)
 }
 
 

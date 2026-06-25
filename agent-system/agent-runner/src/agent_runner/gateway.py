@@ -29,7 +29,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
 from shared import config
-from shared.contracts import Envelope, TaskCreatePayload, TaskIntent
+from shared.contracts import Envelope, Speaker, TaskCreatePayload, TaskIntent, TranscriptPayload
 from shared.harness import now_iso
 from shared.kafka import consume, make_producer, publish
 
@@ -44,6 +44,15 @@ class TaskRequest(BaseModel):
     args: dict[str, Any] = Field(default_factory=dict)
     meeting_id: str = "mtg_dev"
     requested_by: str = "gateway"
+
+
+class TranscriptRequest(BaseModel):
+    """One spoken utterance, posted by the avatar (HTTP edge) → published to
+    `meeting.transcript` so the planner can route it and the FE can show it."""
+    text: str
+    meeting_id: str = "mtg_dev"
+    speaker: str | None = None
+    is_final: bool = True
 
 
 # A fanned-out stream item: (meeting_id, envelope_id, raw_json_text). The id lets a socket dedupe the small
@@ -118,7 +127,7 @@ class Hub:
         group = f"gateway-broadcast-{uuid.uuid4().hex[:8]}"
         while True:  # stay up across a flaky/late Kafka — the FE degrades gracefully meanwhile
             try:
-                async for msg in consume(config.RESULTS, config.ACTIVITY,
+                async for msg in consume(config.RESULTS, config.ACTIVITY, config.TRACE, config.TRANSCRIPT,
                                          group_id=group, settings=self.settings,
                                          auto_offset_reset="latest"):
                     try:
@@ -169,6 +178,21 @@ async def create_task(req: TaskRequest) -> dict:
     )
     await publish(app.state.producer, topic, env, key=task_id)
     return {"task_id": task_id, "status": "accepted", "topic": topic}
+
+
+@app.post("/transcript")
+async def post_transcript(req: TranscriptRequest) -> dict:
+    """Publish one spoken utterance to `meeting.transcript`. The avatar posts here
+    (staying a pure HTTP client) so the planner routes it and the FE feed shows it."""
+    env = Envelope[TranscriptPayload](
+        type="transcript.final" if req.is_final else "transcript.partial",
+        meeting_id=req.meeting_id, ts=now_iso(),
+        payload=TranscriptPayload(
+            speaker=Speaker(name=req.speaker), text=req.text, is_final=req.is_final
+        ),
+    )
+    await publish(app.state.producer, config.TRANSCRIPT, env, key=req.meeting_id)
+    return {"status": "accepted", "topic": config.TRANSCRIPT}
 
 
 @app.websocket("/stream")

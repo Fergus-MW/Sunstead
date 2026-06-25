@@ -49,7 +49,8 @@ TaskIntent = Literal[
     "echo",                                                  # dev / smoke (no creds)
     "build_website", "update_website",                       # web-agent
     "analyze", "summarize_metrics", "query_data",            # data-agent
-    "read_git", "blame", "who_changed", "recent_changes",    # git-agent
+    "read_git", "blame", "who_changed", "recent_changes",    # git-agent (code questions)
+    "ask",                                                   # general KG question (any node/edge type)
 ]
 
 
@@ -87,6 +88,20 @@ class ActivityPayload(BaseModel):
     detail: str | None = None
 
 
+class TracePayload(BaseModel):
+    """A streamed reasoning/output delta for the FE (docs/AGENT_SYSTEM.md §3.5).
+
+    Unlike ActivityPayload (coarse status), this carries the model's live tokens:
+    `phase="thinking"` is summarized chain-of-thought (extended thinking), `phase="text"`
+    is the answer as it generates. `seq` is monotonic per task so the FE can apply deltas
+    in order and drop replays idempotently.
+    """
+    task_id: str
+    seq: int
+    phase: Literal["thinking", "text"]
+    delta: str
+
+
 class KgUpdatePayload(BaseModel):
     """Async 'write this fact to the graph' — consumed by central-kg-api."""
     node_key: str
@@ -96,7 +111,7 @@ class KgUpdatePayload(BaseModel):
 
 Payload = Union[
     TranscriptPayload, MeetingEventPayload, TaskCreatePayload,
-    TaskResultPayload, ActivityPayload, KgUpdatePayload,
+    TaskResultPayload, ActivityPayload, TracePayload, KgUpdatePayload,
 ]
 
 # --- envelope -------------------------------------------------------------
@@ -106,6 +121,7 @@ MessageType = Literal[
     "meeting.event",
     "task.create", "task.completed", "task.failed",
     "activity",
+    "trace",
     "kg.update",
 ]
 

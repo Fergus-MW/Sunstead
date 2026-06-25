@@ -17,6 +17,15 @@ export type TaskResultPayload = {
   error?: string | null;
 };
 
+// A streamed reasoning ("thinking") or output ("text") delta. seq is monotonic per
+// task_id so the client can apply deltas in order and drop replays idempotently.
+export type TracePayload = {
+  task_id: string;
+  seq: number;
+  phase: "thinking" | "text";
+  delta: string;
+};
+
 export type MessageType =
   | "transcript.partial"
   | "transcript.final"
@@ -25,6 +34,7 @@ export type MessageType =
   | "task.completed"
   | "task.failed"
   | "activity"
+  | "trace"
   | "kg.update";
 
 export type Envelope = {

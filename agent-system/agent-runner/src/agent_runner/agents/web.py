@@ -15,6 +15,7 @@ import re
 
 from shared.contracts import TaskCreatePayload
 from shared.harness import TaskCtx
+from shared.streaming import stream_completion
 
 WEB_SYSTEM = """You are the web-agent for Sunstead. Produce a COMPLETE, self-contained \
 single-file HTML document for the requested site: inline <style> (no external CSS/JS files; \
@@ -37,13 +38,16 @@ async def run(task: TaskCreatePayload, ctx: TaskCtx) -> dict:
     style = task.args.get("style") or "clean, modern, dark"
     await ctx.activity("drafting site", brief)
 
-    msg = await ctx.anthropic.messages.create(
+    # Stream the build: reasoning + HTML deltas flow to agent.trace as they generate, so the
+    # dashboard can show the agent thinking and writing live (docs/AGENT_SYSTEM.md §3.5).
+    text = await stream_completion(
+        ctx,
         model=ctx.settings.model_smart,
-        max_tokens=8192,
+        max_tokens=16000,
         system=WEB_SYSTEM,
         messages=[{"role": "user", "content": f"Build: {brief}\nStyle: {style}"}],
     )
-    html = _strip_fences("".join(b.text for b in msg.content if b.type == "text"))
+    html = _strip_fences(text)
     head = html[:200].lower()
     if "<!doctype" not in head and "<html" not in head:
         html = f"<!DOCTYPE html><html><head><meta charset='utf-8'></head><body>{html}</body></html>"
