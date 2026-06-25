@@ -21,6 +21,19 @@ gateway + sites with public TLS and **zero inbound ports**.
 
 ---
 
+## Fast path (scripted)
+
+Three artifacts in `agent-system/deploy/` cut the manual work to a checklist:
+- **`deploy/cloudformation.yml`** — launches the EC2 + an SSH-only security group and installs Docker + clones the
+  repo on first boot. One stack, two params (your key pair + your IP).
+- **`.env.aws.example`** — the deploy env with the Aiven Kafka values prefilled; you fill **4** secrets.
+- **`deploy/deploy.sh`** — preflights the certs/secrets, builds, starts the Aiven+Cloudflare stack, waits for health.
+
+With the scripts your part is: **§0 (gather)** → deploy the CFN stack → SSH in → drop in the 3 certs + `.env` →
+`bash deploy/deploy.sh` → map the Cloudflare hostnames → point Vercel at them. The detailed steps below explain each.
+
+---
+
 ## 0. Gather first (the operator-only bits)
 
 | Need | Where | Note |
