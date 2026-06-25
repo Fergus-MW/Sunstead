@@ -5,6 +5,104 @@
 
 ---
 
+## 2026-06-25 — Added `/search`: BM25→graph retrieval (the smart read path)
+
+**What:** added `GET /search` to `central-kg-api` — OpenSearch BM25 over the mirrored `kg-nodes` index → node ids →
+the existing recursive-CTE neighborhood (`subgraph_bfs`). Same `QueryResult` shape as `/query`, so it's a **drop-in
+upgrade** for the avatar's `lookup_context` and the FE: change the path from `/query` to `/search`. New `app/search.py`
+(BM25 client) + `app/routers/search.py`; `opensearch_url`/`opensearch_index` added to settings; one `include_router`
+line in `main.py`. Verified: imports, OpenAPI shows `/search` resolving.
+
+**Why:** the live `/query` was **trigram-only** — fuzzy *string* match on node names, weak for the natural-language
+questions the avatar fields ("what's blocking the memory refactor?"). The strong path — OpenSearch BM25 → 2-hop CTE,
+which the retrieval bench measured at ~125 ms — existed *only in the benchmark*, used by no product code. This wires
+that proven path into a real endpoint so the on-stage avatar answers feel smart, not fuzzy. Architecturally clean:
+the avatar is a human-facing HTTP client by design (DESIGN §2 two-layer framing), so a smart `central-kg-api`
+endpoint upgrades it **without** touching the agents'-via-MCP mandate.
+
+**Analysis / consequences:** built as a **strict upgrade, never worse** — if `OPENSEARCH_URL` is unset or OpenSearch
+is unreachable, `bm25_node_ids` returns `None` and the route falls back to the same trigram `hybrid_search` `/query`
+uses, so nothing breaks. Field boosts mirror the bench (`name^3, source_file^2, label, text`); `text` is the
+utterance/commit body once the demo-meeting layer is mirrored (still on `feat/demo-data-layers`), absent fields are
+ignored. Reuses only public graph functions (`subgraph_bfs`, `hybrid_search`) — **did not touch** the hot in-flight
+files (`graph.py`, `routers/subgraph.py`). Follow-ups: point the avatar's `backend.py` `lookup_context` at `/search`
+(one line, owner's file); ensure the OpenSearch mirror has run so the index exists; optional blended scoring
+(BM25 ⊕ trigram) later. To verify once `OPENSEARCH_URL` is set:
+`curl "$KG/search?q=streaming+retry+policy&hops=2"`.
+
+**Touches:** `central-kg-api/app/{search.py (new), routers/search.py (new), config.py, main.py}`, `docs/LOG.md`.
+
+— Claude (Opus 4.8), signed off
+
+---
+
+## 2026-06-25 — Built the planner: the transcript → delegation brain (the missing upstream)
+
+**What:** added `agent_runner.planner` — a third long-lived process alongside the runner and gateway. It tails
+`meeting.transcript`, runs one LLM turn (a forced `propose_tasks` tool call on `MODEL_SMART`) to decide whether an
+utterance is actionable, and publishes the resulting `task.create`(s) onto the right `agent.tasks.*` topics. One
+utterance can fan out to **N tasks** ("build a page *and* tell me who owns auth" → two), grouped under one `plan_id`
+via the existing-but-unused `parent_task_id`/`depth` fields. Each delegation also emits an `agent.activity`
+(`status="delegated"`, `detail=reason`) so the dashboard renders the brain deciding, live. Added `scripts/say.py`
+(+ `make say T=…`, `make planner`) which publishes a `meeting.transcript` exactly as the avatar's STT will — so the
+**entire delegation loop is demoable today, before the avatar branch merges**. Verified: both files compile, the
+module imports against the real `shared` package, and the intent vocab resolves (echo excluded, nine real intents).
+
+**Why:** the gap analysis kept naming "the avatar doesn't delegate" as the one open seam — but the real missing
+piece was never another agent, it was an **orchestration brain**. Delegation was `intent string → one topic → one
+agent`; a spoken sentence is not a clean intent. Without a component that listens to the transcript and *decomposes*
+speech into tasks, `meeting.transcript` had no consumer and `parent_task_id`/`depth` sat unused. This is the spine
+that turns the avatar from "answers questions itself" (bypassing the suite) into "listens, delegates, supervises" —
+which is also the stronger "AI employee" demo. Built as a **peer consumer**, deliberately touching none of the
+proven runner→results loop.
+
+**Analysis / consequences:** three judgment calls. (1) The planner reads its own group at **`auto_offset_reset=
+earliest`** so a request spoken before it connected isn't dropped — a dropped request is a broken promise. This is
+the at-least-once-style delivery improvement applied where it's *new and safe*; I deliberately did **not** flip the
+runner's `latest→earliest`, because on a fresh group that would replay every historical task (rebuilding old sites)
+and correct manual-commit under the runner's bounded concurrency is a real change, not a one-liner — it deserves its
+own reviewed, env-gated, default-off entry. (2) Transcripts are processed **sequentially with an envelope-id
+dedupe**, so a redelivered line can't double-delegate (no duplicate websites); the trade-off is no fan-out on the
+planner itself, fine for demo throughput. (3) Acts only on `transcript.final`/`is_final` and ignores sub-8-char
+lines — partials are noise. The system prompt is intentionally conservative (ordinary conversation → zero tasks);
+the obvious next tuning is multi-line aggregation (a request spanning two utterances) and a per-meeting context
+window. Natural follow-ups, unchanged by this entry: close the `kg.updates` loop so delegated work flows back into
+the graph (the flywheel), and point the avatar's `delegate()` at the same path (or let it just publish transcripts
+and let the planner do the rest — this makes option (b) viable without the gateway).
+
+**Touches:** `agent-system/agent-runner/src/agent_runner/planner.py` (new), `agent-system/scripts/say.py` (new),
+`agent-system/Makefile`, `docs/LOG.md`. (No infra committed; no changes to `shared/**`, the runner, or the gateway.)
+
+— Claude (Opus 4.8), signed off
+
+---
+
+## 2026-06-25 — Hardened the gateway WS feed (shared consumer + replay buffer)
+
+**What:** rewrote `agent_runner.gateway`'s `WS /stream` from a per-connection consumer to **one shared broadcast
+consumer + a bounded replay ring + per-socket queues** (`Hub`). On connect, a browser replays the recent ring (last
+200 envelopes), then streams live; replay/live overlap is de-duped by envelope id. Added `scripts/gateway_smoke.py`
+(+ `make gateway-smoke`) — a no-Kafka, no-server in-process check of replay / no-dup / meeting-filter / fan-out; all
+pass.
+**Why:** the dashboard is being wired to the real Aiven Kafka now, and the old design had three latent demo-day
+flakes: (1) a *fresh consumer group per connection* with `auto_offset_reset=latest` could miss a fast
+`agent.results` produced in the gap before the group finished joining → "I clicked ask and nothing appeared"; (2) one
+malformed frame threw inside the consume loop and tore down the socket for all later messages; (3) the FE's
+auto-reconnect spun a new Kafka consumer group per reconnect (group sprawl). The ring buffer makes the feed
+deterministic for a recorded demo — you can open the dashboard *after* asking and still see the result.
+**Analysis / consequences:** the WS endpoint is now a trivial `async for text in hub.stream_for(meeting_id)`; the
+testable logic lives on `Hub`. A unique consumer group per process keeps every gateway instance a full-stream
+broadcaster (not work-sharing). Per-socket queues are bounded (drop on a stalled browser rather than back up the
+consumer). The contract the FE depends on is unchanged: `/tasks`, `/health`, `/stream?meeting_id=`, raw envelope
+JSON frames. Verified: import OK, routes intact, smoke passes. Left uncommitted alongside in-flight FE/KG work; did
+not touch the hot files (`graph.py`, `meet-joiner/graph/**`, `config.py`/`mcp.py`).
+**Touches:** `agent-system/agent-runner/src/agent_runner/gateway.py`, `agent-system/scripts/gateway_smoke.py`,
+`agent-system/Makefile`, `docs/LOG.md`.
+
+— Claude (Opus 4.8), signed off
+
+---
+
 ## 2026-06-25 — MCP toggle ON → 34% slice live; created Kafka topics via MCP
 
 **What:** the org enabled "Allow MCP connection," and `aiven_pg_read` immediately returned real data

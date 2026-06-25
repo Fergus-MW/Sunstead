@@ -4,9 +4,12 @@
 > Lives at `central-kg-api/`. Reads and writes to an Aiven Postgres instance with
 > pgvector. Deployable as a single AWS Lambda behind API Gateway (Mangum).
 
-Status as of this doc: **scaffolded and live against Aiven**. Schema applied,
-async DB round-trip verified end-to-end. Repo seeding (tree-sitter / git) and
-OpenSearch quicksearch are **not yet implemented** — see [§7 Gaps vs PLAN.md](#7-gaps-vs-planmd).
+Status as of this doc: **live against Aiven and seeded**. Schema applied, async DB
+round-trip verified end-to-end, and the **repo-seed CLI is implemented** (`seed/`,
+tree-sitter + git → ~6,183 nodes / 26,179 edges from `anthropic-sdk-python`) with a
+**seed-time OpenSearch mirror** (`seed/mirror_opensearch.py`). Still open: a
+**runtime** OpenSearch quicksearch endpoint (the app queries pgvector + trigram only)
+and the `kg.updates` Kafka consumer — see [§7 Gaps vs PLAN.md](#7-gaps-vs-planmd).
 
 ---
 
@@ -212,8 +215,8 @@ still needs doing or deciding.
 |---------------------------------------------|------------------------------------------------|-------------|
 | Schema `nodes(kind, key, props, embedding)`, `edges(src_id, dst_id, rel, props)` with BIGINT ids and HNSW index | `nodes(type, name, properties, embedding)`, `edges(source_node_id, target_node_id, type, properties)` with UUID ids and IVFFLAT index | **Naming divergence** — see decision below |
 | Endpoints: `POST /query`, `/semantic_search`, `/quicksearch`, `/upsert`, `/seed` | `POST /ingest /extract /node /link /update`; `GET /query /entity/:id /subgraph /timeline` | **Surface divergence** |
-| OpenSearch mirror for quicksearch          | Not wired — `pg_trgm` only                     | **Missing** |
-| `seed` CLI: tree-sitter + git → nodes/edges | Not implemented                                | **Missing** |
+| OpenSearch mirror for quicksearch          | Seed-time mirror **done** (`seed/mirror_opensearch.py`); runtime `/quicksearch` endpoint not wired — app uses `pg_trgm` + pgvector | **Partial** |
+| `seed` CLI: tree-sitter + git → nodes/edges | **Done** — `seed/` (tree-sitter + git, `graphify_adapter.py`); ~6,183 nodes / 26,179 edges seeded live | **Done** |
 | `kg.updates` Kafka consumer → async writes | Not implemented                                | **Missing** |
 | HNSW vector index                          | IVFFLAT (Postgres 17 + pgvector supports both) | **Minor**   |
 
@@ -238,10 +241,11 @@ still needs doing or deciding.
 
 ## 8. TODO next
 
-1. **`seed` CLI** — tree-sitter walk over a target repo, `git log`, bulk
-   upsert into `nodes`/`edges` (PLAN.md §9.3). Lives at `central-kg-api/seed/`.
-2. **OpenSearch mirror** — provision the Aiven service, mirror node text +
-   source content on write, expose `GET /quicksearch?q=…`.
+1. ~~**`seed` CLI**~~ ✅ **done** — tree-sitter + `git log` over a target repo, bulk
+   upsert into `nodes`/`edges` (`central-kg-api/seed/`, `graphify_adapter.py`).
+2. **OpenSearch — runtime path** — the seed-time mirror exists
+   (`seed/mirror_opensearch.py`); still to do is the live `GET /quicksearch?q=…`
+   endpoint (the MCP exposes no OpenSearch search tool, so query the OS HTTP endpoint directly — see `infra/README.md`).
 3. **`kg.updates` Kafka consumer** — listen on the Aiven Kafka bus; the
    Listener agent publishes `(node|edge) upsert` events and we apply them
    async so the live write path never blocks the call.

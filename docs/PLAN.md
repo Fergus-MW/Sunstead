@@ -4,8 +4,16 @@
 > **knowledge graph**, and dispatches work to a **suite of specialist agents** over a Kafka bus.
 > Built on the **Claude Agent SDK (Python)** with **Aiven** (Kafka + PostgreSQL + OpenSearch) as the data layer.
 
-Status: **planning** — this document is the contract we execute against. Nothing here is built yet.
-All technology claims below are grounded in current docs (June 2026); see [§14 Sources](#14-sources).
+> ⚠️ **SUPERSEDED — historical planning doc, do not read as current.** This was the original whole-system plan; its
+> repo layout (`call-gateway/`, `listener-agent/`, `api-gateway/`, `agents/{web,data,git}-agent/`, `frontend/`,
+> root `shared/`) **does not match the built tree** (`agent-system/`, `meet-joiner/`, `central-kg-api/`,
+> `avatar-agent/`). For current reality see **[OVERVIEW.md](OVERVIEW.md)**; for the target architecture and the
+> binding source-of-truth see **[DESIGN.md](DESIGN.md)** (DESIGN wins on any conflict). Kept for the research trail
+> (§3 tech decisions, §5 topic design, §6 contracts, §9 KG design, §14 sources remain useful reference).
+
+Status: **superseded planning doc** — preserved as a deep reference. The architecture/topology sections are folded
+into DESIGN; the rubric/research detail is still good background. All technology claims were grounded in current
+docs (June 2026); see [§14 Sources](#14-sources).
 
 ---
 

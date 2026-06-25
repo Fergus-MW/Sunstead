@@ -21,7 +21,7 @@ Provisioning is `avn`-CLI-driven and writes secrets to a local `.env` only
 |---|---|---|---|
 | `central-kg-pg` | `pg:free-1-1gb` (PG 17) | `do-lon` | Graph + pgvector + recursive-CTE traversal |
 | `central-kg-os` | `opensearch:free-4-20` (OS 3.3) | `do-lon` | BM25 / k-NN entry point over node text |
-| ~~`central-kg-kafka`~~ | — | — | Not provisioned yet; needs a paid plan (no Kafka free tier) |
+| `kafka-254bd14f` | (paid) | — | **Provisioned and RUNNING.** Dispatch bus; all 9 topics created via MCP `aiven_kafka_topic_create` (see `agent-system/scripts/provision_topics.py` + `docs/LOG.md`). |
 
 Both free-tier services run in `do-lon` because Aiven's free tier is only
 available on `DigitalOcean` / `UpCloud` (not AWS). When we move the listener
