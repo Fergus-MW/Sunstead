@@ -142,6 +142,17 @@ async def entrypoint(ctx: JobContext) -> None:
     # ── Avatar: render a real-time lip-synced face into the room. When an avatar
     # session is attached, the agent's audio is routed to the avatar worker (which
     # publishes synced audio+video) rather than straight to the room. ──
+    # Anam needs both an API key and an avatar (persona) id; fail with a clear
+    # message rather than a cryptic Anam API error if either is missing.
+    if not cfg.anam_api_key:
+        raise RuntimeError(
+            "ANAM_API_KEY (or ANAM_API_TOKEN) is not set — the avatar can't authenticate to Anam."
+        )
+    if not cfg.anam_avatar_id:
+        raise RuntimeError(
+            "ANAM_AVATAR_ID is not set — pick an avatar/persona id from the Anam "
+            "dashboard (lab.anam.ai) and set it in your .env."
+        )
     avatar = anam.AvatarSession(
         persona_config=anam.PersonaConfig(
             name=cfg.anam_avatar_name,

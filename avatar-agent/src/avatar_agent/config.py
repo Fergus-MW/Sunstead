@@ -6,10 +6,12 @@ All secrets come from the environment / a secret manager — never hard-coded
 
 from __future__ import annotations
 
+import os
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PipelineMode = Literal["cascade", "realtime"]
@@ -32,7 +34,11 @@ class Settings(BaseSettings):
     viewer_url: str = Field(default="", alias="VIEWER_URL")
 
     # ── Anam (avatar) ──
-    anam_api_key: str = Field(default="", alias="ANAM_API_KEY")
+    # Accept either ANAM_API_KEY (the name Anam/LiveKit document) or ANAM_API_TOKEN
+    # (the name used in the shared repo-root vault) so the same key works for both.
+    anam_api_key: str = Field(
+        default="", validation_alias=AliasChoices("ANAM_API_KEY", "ANAM_API_TOKEN")
+    )
     anam_avatar_id: str = Field(default="", alias="ANAM_AVATAR_ID")
     anam_avatar_name: str = Field(default="Sunstead", alias="ANAM_AVATAR_NAME")
 
@@ -70,6 +76,36 @@ class Settings(BaseSettings):
         return f"https://{self.recall_region}.recall.ai"
 
 
+def _load_env_files() -> None:
+    """Merge every `.env` from cwd up to the filesystem root into the environment,
+    nearest-wins, skipping empty values — so the shared **repo-root `.env` vault**
+    is picked up even when the worker is launched from `avatar-agent/`. Real env
+    vars always win (we only `setdefault`). dotenv is an optional dev convenience;
+    in prod, config comes from the environment / a secret manager (PRD §5.4).
+    """
+    try:
+        from dotenv import dotenv_values
+
+        merged: dict[str, str] = {}
+        for d in reversed([Path.cwd(), *Path.cwd().parents]):  # farthest first → nearest overrides
+            p = d / ".env"
+            if p.exists():
+                for k, v in dotenv_values(p).items():
+                    if v and not v.lstrip().startswith("#"):
+                        merged[k] = v
+        for k, v in merged.items():
+            os.environ.setdefault(k, v)
+    except Exception:
+        pass
+
+
 @lru_cache
 def settings() -> Settings:
-    return Settings()
+    _load_env_files()
+    cfg = Settings()
+    # Belt-and-suspenders: some LiveKit plugin code paths read ANAM_API_KEY straight
+    # from the environment. If the key was provided only as ANAM_API_TOKEN, mirror it
+    # to the canonical name so those paths authenticate too.
+    if cfg.anam_api_key and not os.environ.get("ANAM_API_KEY"):
+        os.environ["ANAM_API_KEY"] = cfg.anam_api_key
+    return cfg
