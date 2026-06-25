@@ -202,8 +202,7 @@ export default function Home() {
             The sun never sets on this meeting
           </h1>
           <p className="text-sm italic text-[#f3ead3]/70">
-            Paste a Google Meet link. We&apos;ll send an envoy across the
-            tundra.
+            Paste a Google Meet link. Aino will join your call.
           </p>
         </div>
 
@@ -225,8 +224,8 @@ export default function Home() {
             className="w-full rounded-md bg-[#f3ead3] px-3 py-2 text-sm font-medium text-[#1d2e4a] transition-colors hover:bg-white disabled:cursor-not-allowed disabled:opacity-40"
           >
             {status.kind === "joining"
-              ? "Sending envoy across the tundra…"
-              : "Send the envoy"}
+              ? "Sending Aino across the tundra…"
+              : "Send Aino"}
           </button>
 
           <div className="flex items-center gap-3 text-[10px] uppercase tracking-[0.3em] text-[#f3ead3]/40">
@@ -247,7 +246,7 @@ export default function Home() {
 
         {status.kind === "joined" && (
           <div className="mt-4 rounded-md border border-[#f3ead3]/20 bg-black/30 p-3 text-center text-sm text-[#f3ead3] backdrop-blur-md">
-            Envoy has reached the meeting hall.
+            Aino has joined the meeting.
             <div className="mt-1 font-mono text-xs text-[#f3ead3]/60">
               meeting · {status.meetingId}
             </div>

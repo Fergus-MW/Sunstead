@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Sunstead",
-  description: "Send an envoy into a meeting; watch its agents work the knowledge graph.",
+  description: "Aino joins your meeting; watch its agents work the knowledge graph.",
 };
 
 export default function RootLayout({
