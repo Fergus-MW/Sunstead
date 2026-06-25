@@ -5,6 +5,131 @@
 
 ---
 
+## 2026-06-25 - Unified the write paths into one universal ingestor (schema reconciled, entity/episode keying centralised)
+
+**What:** every path that writes the KG now goes through **one door** — `shared/ingest.py` — split into two layers
+each doing one job well. **`extract()`** (the smart layer) turns free text into typed nodes/edges via a **strict**
+structured-output tool whose `type` fields are `enum`-pinned to the canonical vocabulary, so the model literally
+cannot emit an out-of-schema type and there's no brittle JSON-fence parsing (the old `central-kg-api/app/extract.py`
+failure mode). **`persist()`** (the safe layer, on `shared/kg_write.py`) applies identity keying **once and
+centrally** — episodes scope-keyed `{scope}::{slug}`, entities canonicalised (normalise + alias) — auto-attaches
+provenance for single-source ingests, and dedupes within a batch so a repeated key can't trip Postgres'
+"cannot affect row a second time". `ingest()` = extract-then-persist, the ready door for an integration connector.
+The three bespoke write-backs (**research**, **meeting-ops**, **web**) were refactored onto `persist()` — their
+hand-rolled SQL is gone (research's `_write_back` dropped ~40→~20 lines), which also *proved* the abstraction:
+three different shapes (multi-source episode, owner-graph, entity+link) all collapsed cleanly. New
+**`shared/schema.py`** is the single source of truth for the vocabulary + the entity/episode split (`is_episode()`);
+`central-kg-api/app/models.py` and `meet-joiner/.../types.ts` were reconciled to mirror it.
+
+**Why:** a great graph representation is the foundation every downstream answer rides on, and we had **two drifting
+schemas** plus **three agents each hand-coding their node/edge shapes**. `models.py` declared 13 node / 10 edge types,
+but the writers + seed + traversal used a richer, *different* set (`commit`, `utterance`, `action_item`,
+`research_finding`, `policy`, `website`; `authored`/`touches`/`said`/`attended`/`in_meeting`/`rationale_for`) — so the
+extractor emitted one vocabulary while the traversal expected another (`graph.py`'s allowlist even followed
+`imports`/`calls`, which graphify maps to `depends_on` and *never writes*). With the vocab fragmented and keying
+re-implemented per agent, "dump info into the graph" only worked for the two shapes someone wrote by hand, and a
+generic ingestor was impossible. Reconciling to one schema (19 node / 16 edge types) + one keyed-and-provenanced
+persister makes representation quality a property of the system, not of each call site, and opens a single clean door
+for integrations (Notion/Drive) and the research agent alike.
+
+**Analysis / consequences:** entity resolution is deliberately the cheap, high-yield 90% — deterministic
+normalisation (trim/collapse/strip/handle-marker) + a curated `PERSON_ALIASES` map (empty seam for now) — so
+`@Sam`/`Sam P.` collapse to one node instead of forking the graph; embedding-assisted dedup-on-write is the deferred
+next tier (needs `embeddings.py`, still a no-op). Keying now lives in exactly one function (`canonical_key`), so no
+agent can re-introduce the silent cross-meeting merge §6 records. **Known gap:** the HTTP `/ingest` path in
+central-kg-api (`persist_extracted_graph`) still upserts episodes by raw name — it's a separate deployable that can't
+import `shared`, so its episode-merge bug is live *there*; the agent suite no longer touches it, but ingesting a
+transcript over HTTP would still merge. Verified: `py_compile` + import of schema/ingest/kg_write/research/meeting/web;
+a stub-ctx smoke test of keying, entity resolution, batch-dedupe (one owner × two items → a single `person` row),
+the integration anchor+provenance path, and `extract()` reshaping (drops out-of-vocab + endpoint-less, keeps
+evidence); and a cross-package check that all graphify-adapter targets are in the reconciled vocab. No live LLM/MCP
+call exercised. Per DESIGN §6, this vocab change is a schema change — hence this entry.
+
+**Touches:** `agent-system/shared/src/shared/{schema.py (new),ingest.py (new),kg_write.py}`,
+`agent-system/agent-runner/src/agent_runner/agents/{research,meeting,web}.py`,
+`central-kg-api/app/models.py`, `meet-joiner/src/app/graph/types.ts`, `docs/LOG.md`.
+
+- Claude (Opus 4.8), signed off
+
+---
+
+## 2026-06-25 - Grounded the web-agent build (no-hallucinate sites) + shared the web-search loop
+
+**What:** the **web-agent's build path now grounds itself in the live web**. When a brief refers to something real
+("build a site about the EU AI Act"), the model uses Claude's server-side `web_search`/`web_fetch` to verify the
+facts BEFORE it writes the copy — so the site isn't hallucinated — and a purely aesthetic brief simply skips search.
+The build budget (searches/fetches/turns/thinking) scales with the planner's effort tier (`shared.effort`), with a
+turn floor of 4 so a couple of search round-trips still leave room to emit the document; on a timeout/empty result it
+falls back to an ungrounded build (a site still ships). Cited URLs ride back as `result.sources` + `meta.grounded_sources`
+(provenance). To avoid duplicating the gnarly server-tool loop, I factored it into **`shared/websearch.py`**
+(`grounded_stream` + tool specs + citation/source harvesting + the `pause_turn` continuation + HTTP-200 tool-error
+handling), and the **research agent now uses it too** (its bespoke `_inner` loop is gone). The **planner** was tuned so
+"build a site about X and look it up" collapses to ONE grounded `build_website` task (the web-agent researches itself);
+a separate research/git task is emitted only when the speaker wants that answer delivered to *them*, not merely baked
+into the site (worked example #11 added).
+
+**Why:** a compound "build + understand X" request used to fan out into two independent, isolated tasks — the
+web-agent never saw the research, so it invented the site's factual copy while the research answer landed on a
+separate card, unused (the agent-to-agent-chaining gap, AGENT_SYSTEM §4). Option B (self-grounding) fixes the
+hallucination with **one task and no orchestration plumbing** — far cheaper than making the planner await results, and
+more demo-robust. It also turns "the agent built a site" into "the agent *researched and* built a grounded site,"
+which is a stronger claim.
+
+**Analysis / consequences:** grounding is gated by the model's own judgement (the system prompt says search only for
+real/falsifiable claims) so aesthetic builds pay no search latency; grounded builds are slower (the slow path already)
+and bounded by `BUILD_TIMEOUT_S=150`. The shared loop preserves research's semantics exactly (last text block = the
+synthesis/HTML; citation-then-fetched-URL source fallback; best-effort, never raises). `update_website` is left
+ungrounded for now (it edits known-good HTML; grounding an edit is a follow-up). Verified: `py_compile` + import of
+web/research/planner/websearch; a unit check of `_extract_html` (strips a "Here's your site:" preamble, leaves a clean
+`<!DOCTYPE>` at offset 0 untouched — caught and fixed an `i > 0` vs `i >= 0` bug); durable-dedupe regression still
+green. No live web/LLM call exercised — the loop is validated by construction. Note: `meeting.py` is mid-conversion to
+the new `shared/ingest.persist()` door (imports switched, body not yet) — left to the in-flight refactor that already
+converged `research.py`.
+
+**Touches:** `agent-system/shared/src/shared/websearch.py` (new), `agent-system/agent-runner/src/agent_runner/agents/{web,research}.py`,
+`agent-system/agent-runner/src/agent_runner/planner.py`, `docs/{AGENT_SYSTEM}.md`,
+`reviewmd/2026-06-25T12-30Z-vision-gaps-snapshot.md`, `docs/LOG.md`.
+
+- Claude (Opus 4.8), signed off
+
+---
+
+## 2026-06-25 - Closed two vision gaps: research write-back + durable dedupe
+
+**What:** (1) the **research agent now writes its findings back into the KG** — after answering from the live web it
+persists a `research_finding` node (`{meeting_id}::{slug(question)}`, carrying the question + answer + source URLs), a
+`source_document` node per cited URL, and `in_meeting` / `derived_from` edges, all via `aiven_pg_write`. (2) the
+harness **dedupe window is now durable** — claimed idempotency keys are journaled to `sessions_dir/seen.log` and
+reloaded at boot, so a runner **restart no longer re-runs delivered tasks** (the duplicate-site-build / duplicate-KG-
+write bug under at-least-once redelivery). Extracted the idempotent node/edge SQL builders out of `meeting.py` into a
+shared `shared/kg_write.py` (`lit`/`jsonb`/`slug`/`insert_nodes`/`insert_edge`/`kg_exec`) so both write-back agents
+share one injection-safe, idempotent implementation.
+
+**Why:** two of the headline "self-growing knowledge base" claims outran the code. Online lookups were answered then
+**discarded** — so the graph never learned from research; now every web lookup becomes durable, queryable team memory
+(and more MCP write surface, which strengthens the 34% depth story). And the in-memory `_seen` set meant a restart
+silently re-ran in-flight tasks — a real correctness bug that could double-deploy a site on camera. Both were called
+out in the vision-gaps snapshot as the cheapest fixes that convert a soft claim into a code-backed one.
+
+**Analysis / consequences:** write-back is **best-effort and gated on a real answer** — a write hiccup is surfaced as
+an `activity` line and never fails the already-emitted result, and an empty answer is never persisted. The research
+finding reuses the meeting-ops episode-keying rule (DESIGN §6) so re-asking the same question within a meeting
+collapses onto one node. Durable dedupe is also best-effort: the journal is append-only with compaction at `SEEN_MAX`,
+loads the last `SEEN_MAX` keys at boot, and any I/O failure degrades to the prior in-memory behavior (never blocks task
+processing). `claim()` is synchronous (no await) so concurrent `asyncio` tasks can't race it. The `meeting.py` refactor
+is behavior-preserving (helpers moved verbatim). Verified: `py_compile` + import of all four modules; a standalone test
+asserting injection-safe quoting (`O'Brien` → `O''Brien`), the empty-name guard, and durable dedupe surviving a
+simulated restart (a redelivered key stays a no-op across a fresh `AgentContext`). No DB round-trip exercised yet —
+the write-back SQL is validated by construction, not against live Aiven.
+
+**Touches:** `agent-system/shared/src/shared/kg_write.py` (new), `agent-system/shared/src/shared/harness.py`,
+`agent-system/agent-runner/src/agent_runner/agents/{meeting,research}.py`, `docs/{OVERVIEW,DESIGN,AGENT_SYSTEM}.md`,
+`reviewmd/2026-06-25T12-30Z-vision-gaps-snapshot.md`, `docs/LOG.md`.
+
+- Claude (Opus 4.8), signed off
+
+---
+
 ## 2026-06-25 - Refactored mission control around stable focus and stream visibility
 
 **What:** replaced the expanding-card dashboard with a three-pane operator layout: a stable task list, a selected-task

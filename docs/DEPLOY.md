@@ -153,7 +153,8 @@ Then drop the `redpanda` dependency (you're using the managed cluster). The 9 to
 - Build & push `sunstead/agent-suite`. Run it as **three long-lived services** — `runner`, `planner`, `gateway`
   — plus `sites` (or fold the static host into the gateway / move web output to real object storage).
 - All config is env: `ANTHROPIC_API_KEY`, `AIVEN_TOKEN`, the `KAFKA_*` block (§3), `SITES_BASE_URL` (the public
-  URL artifacts resolve at).
+  URL artifacts resolve at), and optionally `VERCEL_TOKEN` / `VERCEL_PROJECT` to publish sites to Vercel instead
+  of the local static host (then `SITES_BASE_URL`/`:8810` is unused for artifact links).
 - On a single VM, `docker compose up -d` with the `KAFKA_*` pointed at Aiven is the lowest-effort path.
 
 ### Central KG API — container or Lambda
@@ -179,7 +180,8 @@ Then drop the `redpanda` dependency (you're using the managed cluster). The 9 to
 1. **Public TLS for the gateway *and* the KG API.** The browser (on Vercel) opens a WebSocket straight to the
    gateway, so it must be reachable over **`wss://` with a real cert**; the FE also proxies graph queries to the
    KG API over HTTPS. On a VM, put **Caddy** (automatic TLS) in front of both — it's the 5-minute fix. The
-   web-agent's `:8810` (or wherever `SITES_BASE_URL` points) must be public too, or artifact links 404.
+   web-agent's `:8810` (or wherever `SITES_BASE_URL` points) must be public too, or artifact links 404 —
+   **unless** `VERCEL_TOKEN` is set, in which case sites publish to Vercel and `:8810` needn't be exposed.
 2. **Secrets live in the host environment, never the image.** The `.dockerignore` files keep `.env` out of the
    build. Inject `ANTHROPIC_API_KEY` / `AIVEN_TOKEN` / `KAFKA_PASSWORD` / `DATABASE_URL` as host env vars or your
    platform's secrets store.

@@ -219,15 +219,19 @@ fleet-over-time view, and moving the conductor's judgement (conflict, auto-stop)
 
 ### Adjacent reliability wins (same analysis surfaced these)
 
-- **Durable idempotency.** `harness` dedupe (`ctx._seen`) is in-memory; a restart re-runs delivered tasks (duplicate
-  site builds) under at-least-once redelivery. Persist to the session store. *(Real bug, not polish.)*
+- **Durable idempotency — SHIPPED.** `harness` dedupe was in-memory (`ctx._seen`); a restart re-ran delivered tasks
+  (duplicate site builds / KG writes) under at-least-once redelivery. Now journaled to `sessions_dir/seen.log` and
+  reloaded at boot (`AgentContext.claim()`), so a restart resumes the same dedupe window — best-effort, compacted at
+  `SEEN_MAX`, fail-safe to the prior in-memory behavior. *(Was a real bug, not polish.)*
 - **Stream to TTS.** Trace deltas reach the FE but the avatar still gets only the *final* result — the meeting sits
   silent, then a wall of text. A second consumer on `agent.trace`'s `text` phase → the speech path is the real §3.5
   payoff (and the §3 "spoken results" notify edge).
 - **Templated SQL for known intents.** §3.5 wants the LLM skipped on known retrievals; the KG agent LLMs everything —
   slower, costlier, and *more* hallucination surface than a parameterized query.
 - **KG as the cross-agent substrate.** Agents share *conclusions* (nodes), not raw traces — the indexed, durable
-  version of "agents see each other's context."
+  version of "agents see each other's context." Both write-back agents now feed it: meeting-ops persists
+  recap/action-items/decisions and **research persists `research_finding` + `source_document` nodes** (via the shared
+  `shared/kg_write.py` helpers), so a later question can traverse to what an earlier web lookup concluded.
 
 ---
 

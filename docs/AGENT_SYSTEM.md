@@ -276,8 +276,14 @@ verifier** (§4, the harness pre-emit gate).
   injection-guarded SQL + a 60s cache + one streamed Haiku phrasing turn) for the known intents, and the agentic LLM
   path for `ask`. Returns `_verify` evidence (the fetched rows) for the grounding gate.
 - **web-agent** — `build_website`, `update_website`. **Persistent revisioned workspace** (§5) keyed by
-  `workspace_id`; Claude streams a one-file site → written to `SITES_DIR/<task>/` → served URL artifact. (Vercel
-  deploy is the documented swap-in; today it's local-serve.)
+  `workspace_id`; Claude streams a one-file site → written to `SITES_DIR/<id>/index.html`. With `VERCEL_TOKEN`
+  set it deploys **all** sites to one Vercel project (many files, one project) at a stable
+  `https://<project>.vercel.app/<id>/`; the project/deployment ids land in the workspace `meta.json` so
+  `update_website` redeploys in place and the URL never changes. Falls back to local-serve (`:8810`) with no
+  token. Also writes a `website` node to the KG so the avatar can recall the link. **Grounded build:** when the brief
+  names something real, the build path researches the live web first (Claude server-side `web_search`, via the shared
+  `shared/websearch.py` loop, effort-budgeted) and grounds the copy in what it finds — so "build a site about X" gets
+  X right instead of hallucinating it; cited URLs ride back as `result.sources`. (`update_website` stays ungrounded.)
 - **data-agent** — `analyze`, `summarize_metrics`, `query_data`. A **strict-tool** turn plans SQL + a chart spec;
   rows pulled via `aiven_pg_read`; renders a matplotlib PNG **off-thread** → answer + chart artifact. Returns
   `_verify` evidence.
@@ -286,7 +292,9 @@ verifier** (§4, the harness pre-emit gate).
   — idempotent slug-keyed `action_item` / `decision` nodes + `in_meeting` / `owns` edges. The flywheel that grows
   the graph from the meeting itself.
 - **research** ✅ *(real)* — `research`. Claude **server-side `web_search` / `web_fetch`** (adaptive thinking,
-  bounded turns) → answer + sources as URL artifacts; streams thinking/text to `agent.trace`.
+  bounded turns) → answer + sources as URL artifacts; streams thinking/text to `agent.trace`. **Writes findings back
+  to the KG** (`research_finding` + `source_document` nodes + `in_meeting`/`derived_from` edges via `aiven_pg_write`,
+  shared `kg_write.py`) — best-effort, gated on a real answer — so a live lookup becomes durable, traversable memory.
 - **kg-writer** *(roadmap)* — background transcript→graph extraction (meeting-ops now covers the outcome-write
   slice). **reviewer** — shipped as the **grounding verifier** in the harness (gate, not a separate agent).
 

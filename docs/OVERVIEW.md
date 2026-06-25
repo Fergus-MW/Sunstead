@@ -15,6 +15,38 @@ us a landing page and tell me who last touched the auth module,"* and the agent 
 from the code graph. Built for the **Aiven "Autonomous Data Operator"** challenge — the differentiator we control
 most is **agents talking to data infra natively via Aiven MCP** (34% of the score).
 
+### The intent — an employee, not a notetaker
+
+A notetaker is passive: it transcribes, then hands you a summary after the meeting. **Sunstead is the opposite —
+it *acts during* the meeting.** Three things make it an employee rather than a transcript:
+
+1. **It lives in the meeting and has other doors.** The avatar (Aino) sits *in the call* as a participant who can
+   speak and be spoken to — but the meeting is only one access point. The same agent core is reachable from the
+   **dashboard ask-box** and, in principle, any integration we plug in (the realtime layer and the ask-box already
+   share one task front door — the gateway). The meeting is where it's most novel; it is not the only way in.
+2. **It does real work, delegated to a suite of specialists.** Behind the face is an **intelligent agent suite on
+   a Kafka bus**: a *planner* turns what's said into tasks, and specialists execute them — deploy a real website,
+   query the code graph, render a chart from live data, extract decisions/action-items and **write them back into
+   the graph**, run live web research. Output is a *deliverable* (a URL, a chart, a grounded answer), not a note.
+3. **It is overseen, so it can be trusted to speak.** The cost of a wrong step here isn't a failed test caught
+   later — it's **a false statement said out loud to clients in a live meeting.** So every factual answer is
+   gated by a **grounding verifier** (does the answer follow from the rows it actually retrieved?), the whole
+   fleet is legible on a **mission-control dashboard**, and a **control channel** can cut a task short. Oversight
+   is a first-class layer, not an afterthought.
+
+### The three systems underneath
+
+| System | One-line | Why it matters |
+|---|---|---|
+| **Agent suite on Kafka** (`agent-system/`) | A planner + six specialists run as `asyncio` tasks in one container; every status, every reasoning delta, and every result is published to Kafka and broadcast. | The bus makes the whole swarm *observable* and *steerable* — the dashboard, the verifier, and the stop-button are all just Kafka consumers. It's the substrate that lets an overseer watch and interrupt agents. |
+| **Graph knowledge base** (`central-kg-api/` + Aiven PG) | One property graph (code · meetings · people · decisions) on Aiven Postgres + pgvector, seeded from a real codebase (tree-sitter + git → ~6,183 nodes / 26,179 edges) and **grown live** as meeting-ops writes outcomes back. | Cross-domain joins are the point: "who last touched the module this meeting is about?" is one traversal. It's the shared, durable memory the agents reason over — and the more it ingests, the smarter every answer. |
+| **Realtime avatar** (`avatar-agent/`) | LiveKit + Recall + Anam talking-face; STT→Sonnet→TTS in <1s; reads the graph over HTTP for in-conversation lookups. | The "wow", and the thing that makes it an *employee in the room* rather than a tool you open. Kept on a separate, latency-bound tempo from the heavy async work. |
+
+> **The vision in one line:** an AI coworker that sits in your meetings, remembers everything your team and
+> codebase know (in a graph it keeps growing), delegates real work to a watched swarm of specialist agents, and
+> talks to all of its data infrastructure natively through Aiven MCP. Where we are today vs. that north star is
+> §2; the honest gaps between them are tracked in the [vision-gaps snapshot](../reviewmd/2026-06-25T12-30Z-vision-gaps-snapshot.md).
+
 ## 2. The honest current state
 
 **Three strong pillars + a FE, now wired into one system.** Each pillar is individually credible *and* the seams
@@ -25,7 +57,7 @@ remaining risk is no longer "missing wires" — it's **proving the full happy-pa
 | Pillar | State | Reality |
 |---|---|---|
 | **Knowledge graph** (`central-kg-api/`) | ✅ **strongest** | Live Aiven Postgres+pgvector, **seeded ~6,183 nodes / 26,179 edges** from `anthropic-sdk-python`; runtime retrieval is hybrid **pgvector + trigram** (~125 ms). OpenSearch is mirrored at seed time (`seed/mirror_opensearch.py`) but not yet queried at runtime. Demo-bankable data exists *today*. |
-| **Agent suite** (`agent-system/`) | ✅ **MCP-native showpiece** | One container: warm `mcp-aiven` session, Kafka consumer, harness, **+ a planner** (`planner.py`) that turns `meeting.transcript` into delegated `agent.tasks.*`. **Six agents, five real.** **git/KG-agent** answers from the live graph via `aiven_pg_read` (verified: top authors 387/32/23 commits) — now with a **canned fast path** (templated SQL + 60s cache, one Haiku phrasing turn) alongside the agentic LLM path; **web-agent** generates a site with Claude (streamed) and publishes it to a served URL, with a persistent revisioned workspace; **data-agent** renders charts from the KG (strict-tool SQL → matplotlib PNG artifact); **meeting-ops** extracts recap/action-items/decisions from a transcript and **writes them back to the KG** via `aiven_pg_write` (idempotent upserts); **research** answers via Claude server-side web search/fetch (sources as artifacts). echo runs no-creds. A **grounding verifier** gates the git/data answers (annotate-only). web-agent is **local-serve only** (no Vercel yet). |
+| **Agent suite** (`agent-system/`) | ✅ **MCP-native showpiece** | One container: warm `mcp-aiven` session, Kafka consumer, harness, **+ a planner** (`planner.py`) that turns `meeting.transcript` into delegated `agent.tasks.*`. **Six agents, five real.** **git/KG-agent** answers from the live graph via `aiven_pg_read` (verified: top authors 387/32/23 commits) — now with a **canned fast path** (templated SQL + 60s cache, one Haiku phrasing turn) alongside the agentic LLM path; **web-agent** generates a site with Claude (streamed) and publishes it to a served URL, with a persistent revisioned workspace; **data-agent** renders charts from the KG (strict-tool SQL → matplotlib PNG artifact); **meeting-ops** extracts recap/action-items/decisions from a transcript and **writes them back to the KG** via `aiven_pg_write` (idempotent upserts); **research** answers via Claude server-side web search/fetch (sources as artifacts) **and writes its findings back to the KG** (`research_finding` + `source_document` nodes via `aiven_pg_write`) — the same flywheel as meeting-ops, so live lookups become durable team memory. echo runs no-creds. A **grounding verifier** gates the git/data answers (annotate-only). web-agent is **local-serve only** (no Vercel yet). |
 | **Avatar / listener** (`avatar-agent/`, merged to `main`) | ✅ **the wow** | LiveKit + Recall + Anam talking-face; realtime STT→Sonnet→TTS; full Terraform. Reads the KG over HTTP to `central-kg-api` (correct for the latency-bound realtime layer). **Delegation now flows through the planner** (decided §6 of DESIGN): the avatar POSTs each final user utterance to the gateway's `/transcript` → `meeting.transcript` → the planner routes the work — so the same path serves the local `mock_meeting` and the real avatar. The direct `delegate()` tool ([tools.py](../avatar-agent/src/avatar_agent/tools.py)) is now **opt-in** (`AVATAR_DELEGATES=true`, planner then off). Code-complete; prod just needs `GATEWAY_URL` injected (the Terraform doesn't set it yet). |
 | **Frontend** (`meet-joiner/`) | 🟡 **growing** | Next.js bot-launcher (`POST /api/join`) **+ a knowledge-graph explorer** (`/graph`, zero-dep canvas force graph over `central-kg-api`) **+ a mission-control agent dashboard** (`/dashboard`: a live **digest bar** — active/stuck/grounded/flagged — over a tiled task board with **verdict badges**, collapsible **streamed reasoning** (markdown-rendered), per-card **stop** buttons, and an ask box; over the gateway's `WS /stream` / `POST /tasks` / `POST /control`). Still missing the in-call transcript overlay. The dashboard's e2e path (gateway↔Kafka↔runner) and `/graph` over the live KG are **both verified running locally**; degrades gracefully when a backend is down. |
 
