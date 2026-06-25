@@ -1,0 +1,32 @@
+# Central KG API — long-running SERVER image (uvicorn), for a VM / container host.
+# The sibling `Dockerfile` targets AWS Lambda (Mangum handler); this one runs the
+# same FastAPI app as an always-on HTTP service. Pick per deploy target (docs/DEPLOY.md).
+FROM python:3.12-slim
+
+# gcc as cheap insurance for any source wheels; asyncpg/pydantic-core ship manylinux wheels.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends gcc \
+ && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Deps first (layer-cached across code edits). Mirrors pyproject; adds uvicorn for serving.
+RUN pip install --no-cache-dir --upgrade pip \
+ && pip install --no-cache-dir \
+      "fastapi>=0.115" \
+      "uvicorn[standard]>=0.30" \
+      "pydantic>=2.7" \
+      "pydantic-settings>=2.4" \
+      "asyncpg>=0.29" \
+      "sqlalchemy[asyncio]>=2.0.30" \
+      "pgvector>=0.3.6" \
+      "anthropic>=0.40" \
+      "python-dotenv>=1.0" \
+      "httpx>=0.27" \
+      "orjson>=3.10"
+
+COPY app ./app
+
+EXPOSE 8000
+# DATABASE_URL (Aiven asyncpg URL) + ANTHROPIC_API_KEY come from the environment.
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -5,15 +5,27 @@ agent-runner container**. Dispatch is **pure Kafka**; every KG read/write goes t
 (`mcp-aiven`, run locally with a static `AIVEN_TOKEN`). Realtime latency is a first-class constraint.
 
 **Plan:** [`../docs/AGENT_SYSTEM.md`](../docs/AGENT_SYSTEM.md) (focused) · [`../docs/PLAN.md`](../docs/PLAN.md) (whole system).
+**Run/deploy:** [`../docs/DEPLOY.md`](../docs/DEPLOY.md) (the operator runbook — one-command stack + per-component deploy).
 
 ## Layout
 | Path | What |
 |---|---|
-| `shared/` | `contracts` (pydantic) · `kafka` (PLAINTEXT/SASL) · `mcp` (warm Aiven MCP) · `harness` (lifecycle) · `sessions` · `config` |
-| `agent-runner/` | the container: Kafka consumer → harness → `agents/{echo,git,web,data}` |
+| `shared/` | `contracts` (pydantic) · `kafka` (PLAINTEXT/SASL) · `mcp` (warm Aiven MCP) · `harness` (lifecycle) · `streaming` (trace deltas) · `sessions` · `config` |
+| `agent-runner/` | one image, run several ways: the **runner** (Kafka consumer → harness → `agents/{echo,git,web,data}`), the **planner** (transcript→tasks), and the **gateway** (HTTP `/tasks` + WS `/stream`) |
 | `infra/kafka_admin.py` | create topics idempotently (local + Aiven) |
-| `scripts/` | `kafka_smoke` (no creds) · `publish_task` (stand-in listener) · `spike` (Aiven MCP) |
-| `docker-compose.yml` | local Kafka (redpanda) |
+| `scripts/` | `kafka_smoke`/`publish_task` (drive the bus) · `say` (speak into a meeting) · `ask` (direct slice) · `spike`/`ingest_kg` (Aiven MCP) · `serve_sites` (web-agent host) · `fetch_kafka_creds` (Aiven Kafka mTLS) |
+| `Dockerfile` · `docker-compose.yml` | one image + the whole local stack (redpanda + topics + runner + planner + gateway + sites) |
+
+## Quickstart — the whole stack, one command
+```bash
+cd agent-system
+cp .env.example .env                     # add ANTHROPIC_API_KEY + AIVEN_TOKEN for git/web/planner
+docker compose up --build                # redpanda + topics + runner + planner + gateway + sites  (make stack)
+# drive the delegation loop (another terminal):
+docker compose exec planner python scripts/say.py --text "build a landing page and tell me who owns auth"
+# -> planner splits it into tasks; runner runs them; results stream on the gateway WS (:8800)
+```
+Full runbook (hybrid dev, Aiven Kafka, deploy targets): [`../docs/DEPLOY.md`](../docs/DEPLOY.md).
 
 ## Quickstart — local, zero credentials (proves the bus + loop)
 ```bash

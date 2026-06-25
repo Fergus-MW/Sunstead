@@ -10,6 +10,8 @@ Sunstead's docs are split by **tense**, so any agent (or human) knows where to l
 
 **Read order for a new agent:** OVERVIEW (where are we) → DESIGN (where are we going) → skim the last few LOG entries (how we got here / why).
 
+**Operator runbook:** [DEPLOY.md](DEPLOY.md) — one-command local stack + per-component deploy (how to run/ship, not why).
+
 **Deep references** (detailed, being consolidated into DESIGN over time): [PLAN.md](PLAN.md) (whole-system),
 [AGENT_SYSTEM.md](AGENT_SYSTEM.md) (the agent suite), [HACKINFO.md](HACKINFO.md) (challenge + rubric),
 [CENTRAL-KG-API.md](CENTRAL-KG-API.md) (the KG service). When DESIGN and a reference disagree, **DESIGN wins** and the reference should be folded in.

@@ -1,7 +1,27 @@
 name: sunstead-agent-system
 
-# Local Kafka for development (single-node redpanda, Kafka-API compatible, PLAINTEXT).
-# Host apps connect on localhost:19092  ->  set KAFKA_BOOTSTRAP=localhost:19092 (the .env default).
+# The whole agent backend, one command:  docker compose up --build
+#   redpanda  -> local Kafka (PLAINTEXT). Host tools reach it at localhost:19092;
+#                containers on this network reach it at redpanda:9092.
+#   topics    -> one-shot: creates all topics, then exits.
+#   runner / planner / gateway / sites -> the agent suite (one image, four commands).
+# Add the knowledge-graph API too:  docker compose --profile full up --build
+# Point at Aiven instead of redpanda: set KAFKA_* in .env (docs/DEPLOY.md) and drop `redpanda`.
+
+# Shared base for every service built from the agent-suite image. KAFKA_BOOTSTRAP is
+# overridden here (redpanda:9092, the in-network address) so .env can stay localhost-first.
+x-agent: &agent
+  build: .
+  image: sunstead/agent-suite:dev
+  # repo-root .env is the secret "vault" (AIVEN_TOKEN, ANTHROPIC_API_KEY, …); the
+  # local agent-system/.env holds non-secret/local overrides. Later file wins, so
+  # the vault's fresh credentials override any stale copy in agent-system/.env.
+  env_file: [.env, ../.env]
+  environment:
+    KAFKA_BOOTSTRAP: redpanda:9092
+    KAFKA_SECURITY: PLAINTEXT
+  restart: unless-stopped
+
 services:
   redpanda:
     image: docker.redpanda.com/redpandadata/redpanda:v24.2.7
@@ -21,3 +41,62 @@ services:
       interval: 5s
       timeout: 5s
       retries: 12
+
+  # Create all topics once Kafka is healthy, then exit. Everything else waits on this.
+  topics:
+    <<: *agent
+    command: ["python", "infra/kafka_admin.py"]
+    restart: "no"
+    depends_on:
+      redpanda:
+        condition: service_healthy
+
+  runner:
+    <<: *agent
+    command: ["python", "-m", "agent_runner"]
+    depends_on:
+      topics:
+        condition: service_completed_successfully
+    volumes:
+      - sites-data:/app/.sites          # web-agent writes here; `sites` serves it
+      - sessions-data:/app/.sessions
+
+  planner:
+    <<: *agent
+    command: ["python", "-m", "agent_runner.planner"]
+    depends_on:
+      topics:
+        condition: service_completed_successfully
+
+  gateway:
+    <<: *agent
+    command: ["python", "-m", "agent_runner.gateway"]
+    ports:
+      - "8800:8800"
+    depends_on:
+      topics:
+        condition: service_completed_successfully
+
+  sites:
+    <<: *agent
+    command: ["python", "scripts/serve_sites.py"]
+    ports:
+      - "8810:8810"
+    volumes:
+      - sites-data:/app/.sites          # same volume the runner writes to
+
+  # Knowledge-graph API — opt-in (`--profile full`); needs DATABASE_URL (Aiven PG) in .env.
+  kg-api:
+    profiles: ["full"]
+    build:
+      context: ../central-kg-api
+      dockerfile: Dockerfile.server
+    image: sunstead/central-kg-api:dev
+    env_file: [.env]
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+volumes:
+  sites-data:
+  sessions-data:

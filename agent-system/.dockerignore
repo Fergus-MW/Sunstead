@@ -1,0 +1,19 @@
+# Keep the build context lean and secrets out of the image.
+.venv/
+**/.venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+.env
+.env.*
+!.env.example
+.sessions/
+.sites/
+.git/
+.gitignore
+.ruff_cache/
+.pytest_cache/
+*.md
+docker-compose.yml
+Dockerfile
+.dockerignore
