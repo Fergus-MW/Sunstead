@@ -40,7 +40,12 @@ class Settings(BaseSettings):
     anam_api_key: str = Field(
         default="", validation_alias=AliasChoices("ANAM_API_KEY", "ANAM_API_TOKEN")
     )
-    anam_avatar_id: str = Field(default="", alias="ANAM_AVATAR_ID")
+    # Non-secret persona id (from the Anam dashboard). Defaulted so the avatar
+    # runs out of the box; override per-deploy via env, or later per-session when
+    # the FE lets a user pick which avatar joins (dispatch → job metadata).
+    anam_avatar_id: str = Field(
+        default="edf6fdcb-acab-44b8-b974-ded72665ee26", alias="ANAM_AVATAR_ID"
+    )
     anam_avatar_name: str = Field(default="Sunstead", alias="ANAM_AVATAR_NAME")
 
     # ── Cognition ──
