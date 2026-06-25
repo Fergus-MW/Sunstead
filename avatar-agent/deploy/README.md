@@ -42,6 +42,8 @@ livekit_turn_domain = "turn.sunstead.example.com"
 acme_email          = "fergus@60x.ai"
 backend_url         = "https://central-kg-api.example.com"
 # pipeline_mode     = "cascade"   # or "realtime"
+# stt_provider      = "deepgram"  # cascade STT engine (this stack provisions Deepgram)
+# gateway_url       = "https://gateway.example.com"  # delegation edge; blank = delegation off
 # anam_avatar_id    = "..."
 # ssh_ingress_cidr  = "203.0.113.7/32"   # your IP, to SSH the LiveKit box
 EOF

@@ -110,6 +110,11 @@ resource "aws_ecs_task_definition" "agent" {
 
       environment = [
         { name = "PIPELINE_MODE", value = var.pipeline_mode },
+        # The app defaults STT_PROVIDER=soniox, but this stack provisions Deepgram
+        # (deepgram_api_key in SSM, STT_MODEL=nova-3). Pin the provider so the task
+        # matches the secret it's given — otherwise _build_stt() raises on a missing
+        # SONIOX_API_KEY and the worker dies at session start.
+        { name = "STT_PROVIDER", value = var.stt_provider },
         { name = "LLM_MODEL", value = var.llm_model },
         { name = "STT_MODEL", value = var.stt_model },
         { name = "LIVEKIT_URL", value = local.livekit_ws_url },
@@ -118,6 +123,10 @@ resource "aws_ecs_task_definition" "agent" {
         { name = "ANAM_AVATAR_ID", value = var.anam_avatar_id },
         { name = "BACKEND_URL", value = var.backend_url },
         { name = "BACKEND_TIMEOUT", value = "0.3" },
+        # Delegation edge: where the `delegate` tool POSTs /tasks and each final
+        # utterance is published to /transcript. Blank = delegation off (the avatar
+        # degrades gracefully and the FE transcript feed stays empty).
+        { name = "GATEWAY_URL", value = var.gateway_url },
         { name = "ARTIFACT_DIR", value = "/tmp/artifacts" },
         { name = "LOG_LEVEL", value = "INFO" },
       ]

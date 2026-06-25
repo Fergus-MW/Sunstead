@@ -52,3 +52,8 @@ output "ssm_secret_params" {
   description = "SSM parameters to populate with real values before first run."
   value       = [for p in aws_ssm_parameter.provider_secret : p.name]
 }
+
+output "region" {
+  description = "AWS region this stack is deployed in (used by the build/push runbook)."
+  value       = var.region
+}

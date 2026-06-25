@@ -121,6 +121,17 @@ variable "anam_avatar_id" {
   default     = ""
 }
 
+variable "stt_provider" {
+  description = <<-EOT
+    Cascade STT engine: "deepgram" (what this stack provisions a key for) or
+    "soniox". If you set "soniox", also add soniox_api_key to the SSM provider
+    secrets and inject SONIOX_API_KEY into the task — otherwise the worker raises
+    on a missing key at session start.
+  EOT
+  type        = string
+  default     = "deepgram"
+}
+
 variable "stt_model" {
   description = "Deepgram STT model for the cascade pipeline."
   type        = string
@@ -129,6 +140,17 @@ variable "stt_model" {
 
 variable "backend_url" {
   description = "Base URL of the backend API the custom tools call (e.g. central-kg-api)."
+  type        = string
+  default     = ""
+}
+
+variable "gateway_url" {
+  description = <<-EOT
+    Base URL of the agent-system gateway (the delegation edge). The avatar POSTs
+    /tasks here for `delegate` and /transcript for each final utterance. Blank =
+    delegation/transcript-feed off (degrades gracefully). If the gateway requires
+    auth, also provision a gateway_token secret and inject GATEWAY_TOKEN.
+  EOT
   type        = string
   default     = ""
 }

@@ -57,6 +57,8 @@ avatar-agent/
 │  ├─ observability.py  # per-leg latency, tool-call log, post-call artifact
 │  ├─ recall.py         # Recall.ai bot create/leave
 │  ├─ dispatch.py       # `dispatch-bot <meet-url>` — send the avatar into a call
+│  ├─ gateway.py        # delegation edge: POST /tasks (delegate) + /transcript
+│  ├─ lambda_dispatch.py# AWS Lambda Function URL handler that dispatches the bot
 │  └─ config.py         # env/settings
 ├─ viewer/index.html    # the page Recall streams as the bot's camera
 ├─ tests/test_tools.py  # tool error-handling + summarizer + idempotency
