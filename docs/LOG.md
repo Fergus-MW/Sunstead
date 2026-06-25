@@ -5,6 +5,27 @@
 
 ---
 
+## 2026-06-25 — MCP toggle ON → 34% slice live; created Kafka topics via MCP
+
+**What:** the org enabled "Allow MCP connection," and `aiven_pg_read` immediately returned real data
+(`code_module` 5236, `decision` 841, `commit` 500, …). `make ask` now answers genuine questions off the live graph
+— e.g. *top authors: stainless-app[bot] (387), dtmeadows (32), Robert Craigie (23); latest commit touched
+`src/anthropic/_version.py`*. **The 34% MCP-depth showcase is proven end-to-end on real data.** Also discovered
+**Aiven Kafka already exists** (`kafka-254bd14f`, RUNNING — the snapshot's "not provisioned" was stale), and
+created all 9 of our topics on it via `scripts/provision_topics.py` (MCP `aiven_kafka_topic_create` — infra stood
+up through MCP tool calls, the 33%-autonomy flavor).
+**Why:** this turns the architecture from "designed" to "demonstrated" — an agent reaching live infra natively via
+Aiven MCP, both read (Postgres) and control-plane (Kafka topics).
+**Analysis / next:** the dispatch bus now exists on real Aiven Kafka; the remaining wire is connecting the
+agent-runner/gateway to it (bootstrap + SASL/mTLS creds — fetchable via MCP `aiven_service_get` with
+`AIVEN_ALLOW_SECRETS`). web-agent (the deliverable) is being built in parallel. Once both land + Ferg adds the
+`delegate()` tool, the full mid-call flow is wired.
+**Touches:** `agent-system/scripts/provision_topics.py`, `docs/LOG.md`.
+
+— Claude (Opus 4.8), signed off
+
+---
+
 ## 2026-06-25 — Thin vertical slice runs end-to-end; only blocker is an Aiven org toggle
 
 **What:** built `scripts/ask.py` (question → git-agent → Aiven MCP → live KG → answer; **no Kafka, no Docker**) and
