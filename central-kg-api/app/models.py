@@ -4,33 +4,54 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+# Canonical vocabulary. The single source of truth is the agent suite's
+# `agent-system/shared/src/shared/schema.py` (entity/episode split + helpers); this Literal
+# MIRRORS it so the HTTP extractor and FastAPI surface validate against the same set the
+# workers write. Keep in sync — change = PR + a LOG entry (DESIGN §6).
 NodeType = Literal[
+    # entities (stable, name-identified — merge-on-conflict by (type, lower(name)))
     "person",
     "company",
-    "meeting",
-    "task",
-    "workflow",
-    "requirement",
-    "feature",
-    "user_story",
-    "code_module",
     "product",
-    "source_document",
+    "feature",
+    "requirement",
+    "user_story",
+    "workflow",
+    "task",
     "topic",
+    "code_module",
+    "commit",
+    "meeting",
+    "website",
+    "policy",
+    "source_document",
+    # episodes (occurrence-identified — keyed {scope}::{slug}, never name-merged)
+    "utterance",
+    "action_item",
     "decision",
+    "research_finding",
 ]
 
 EdgeType = Literal[
+    # structural / code
     "depends_on",
-    "discussed_in",
-    "implements",
-    "relates_to",
+    "part_of",
     "derived_from",
+    "relates_to",
+    "implements",
+    # work / ownership
+    "owns",
     "assigned_to",
     "blocks",
+    "authored",
+    "touches",
+    # meeting / knowledge
+    "in_meeting",
+    "said",
+    "attended",
     "mentions",
-    "part_of",
-    "owns",
+    "discussed_in",
+    "rationale_for",
 ]
 
 
