@@ -30,6 +30,12 @@ class Settings(BaseSettings):
     recall_api_key: str = Field(default="", alias="RECALL_API_KEY")
     recall_region: str = Field(default="us-east-1", alias="RECALL_REGION")
     bot_name: str = Field(default="Sunstead Avatar", alias="BOT_NAME")
+    # Compute size of Recall's bot VM. The default `web` is only 0.25 core / 750MB —
+    # too small to decode the Anam stream, render the viewer page, AND re-encode into
+    # the call without dropping frames. `web_4_core` (2.25c/5.25GB, $0.60/hr) is
+    # Recall's recommended floor for Output Media; `web_gpu` (6c/13GB + WebGL,
+    # $1.50/hr) is best if the avatar renders on canvas/WebGL.
+    recall_bot_variant: str = Field(default="web_4_core", alias="RECALL_BOT_VARIANT")
 
     # ── LiveKit (orchestration transport) ──
     livekit_url: str = Field(default="", alias="LIVEKIT_URL")
