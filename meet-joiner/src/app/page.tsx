@@ -163,6 +163,21 @@ export default function Home() {
               ? "Sending envoy across the tundra…"
               : "Send the envoy"}
           </button>
+
+          <div className="flex items-center gap-3 text-[10px] uppercase tracking-[0.3em] text-[#f3ead3]/40">
+            <span className="h-px flex-1 bg-[#f3ead3]/15" />
+            <span>or</span>
+            <span className="h-px flex-1 bg-[#f3ead3]/15" />
+          </div>
+
+          <a
+            href="https://meet.new"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="block w-full rounded-md border border-[#f3ead3]/30 px-3 py-2 text-center text-sm font-medium text-[#f3ead3] transition-colors hover:bg-[#f3ead3]/10"
+          >
+            Kindle a new meeting ↗
+          </a>
         </form>
 
         {status.kind === "joined" && (
