@@ -52,6 +52,14 @@ class Settings(BaseSettings):
     backend_token: str = Field(default="", alias="BACKEND_TOKEN")
     backend_timeout: float = Field(default=5.0, alias="BACKEND_TIMEOUT")
 
+    # ── Delegation gateway (the avatar → worker-suite seam, DESIGN §3 option a) ──
+    # The agent-system gateway's base URL. The `delegate` tool POSTs /tasks here to
+    # hand heavy work to the async worker suite over Kafka. Empty = delegation off
+    # (the tool degrades gracefully and says it can't dispatch right now).
+    gateway_url: str = Field(default="", alias="GATEWAY_URL")
+    gateway_token: str = Field(default="", alias="GATEWAY_TOKEN")
+    gateway_timeout: float = Field(default=5.0, alias="GATEWAY_TIMEOUT")
+
     # ── Observability ──
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
     artifact_dir: str = Field(default="./artifacts", alias="ARTIFACT_DIR")

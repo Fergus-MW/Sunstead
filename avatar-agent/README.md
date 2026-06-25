@@ -124,6 +124,7 @@ schema the model sees. Shipped tools (calling `central-kg-api`):
 | `get_entity(entity_id, hops)` | `GET /entity/{id}` | Expand one entity's neighborhood. |
 | `recent_activity(since)` | `GET /timeline` | What changed recently. |
 | `record_action_item(description, owner)` | `POST /update` | **Write** — capture a follow-up (idempotent). |
+| `delegate(intent, brief)` | gateway `POST /tasks` | **Hand off** — dispatch heavy work (build a site, dig into git, analyze data) to the async worker suite over Kafka. Fire-and-forget; result surfaces on the FE. |
 
 **Add a tool** (story CT-3): write a `@function_tool` async function and append
 it to `BACKEND_TOOLS`. The conversation loop in `agent.py` is untouched.

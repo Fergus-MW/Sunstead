@@ -46,13 +46,32 @@ class _FakeBackend:
         return {"ok": True}
 
 
+class _FakeGateway:
+    """Stand-in for GatewayClient — records delegations, always 'enabled'."""
+
+    enabled = True
+
+    def __init__(self, fail: BackendError | None = None) -> None:
+        self.fail = fail
+        self.delegated: list[dict] = []
+
+    async def delegate(self, *, intent, args, meeting_id, requested_by="avatar"):
+        if self.fail is not None:
+            raise self.fail
+        record = {"intent": intent, "args": args, "meeting_id": meeting_id}
+        self.delegated.append(record)
+        return {"task_id": "tsk_abc123", "status": "accepted"}
+
+
 def _call(fn):
     """A @function_tool object is directly callable and proxies to the function."""
     return fn
 
 
-def _runtime(backend) -> AgentRuntime:
-    return AgentRuntime(backend=backend, tools_log=ToolCallLog())
+def _runtime(backend, gateway=None, meeting_id="abc-defg-hij") -> AgentRuntime:
+    return AgentRuntime(
+        backend=backend, tools_log=ToolCallLog(), gateway=gateway, meeting_id=meeting_id
+    )
 
 
 async def test_lookup_context_summarizes_nodes():
@@ -87,6 +106,45 @@ async def test_write_uses_correlation_id_as_idempotency_key():
     assert appended["key"]  # an idempotency key was sent
     assert appended["key"] == rt.tools_log.calls[-1].correlation_id
     assert "owner: Fergus" in appended["body"]
+
+
+async def test_delegate_routes_brief_to_correct_arg_key():
+    gw = _FakeGateway()
+    rt = _runtime(_FakeBackend(), gateway=gw)
+    out = await _call(tools.delegate)(
+        _Ctx(rt), intent="build_website", brief="a dark landing page for Acme"
+    )
+    assert "on it" in out.lower()
+    sent = gw.delegated[-1]
+    # web-agent reads args.brief; the canonical meeting_id is forwarded for correlation.
+    assert sent["args"] == {"brief": "a dark landing page for Acme"}
+    assert sent["intent"] == "build_website"
+    assert sent["meeting_id"] == "abc-defg-hij"
+    assert rt.tools_log.calls[-1].status == "ok"
+
+
+async def test_delegate_rejects_unknown_intent_without_calling_gateway():
+    gw = _FakeGateway()
+    rt = _runtime(_FakeBackend(), gateway=gw)
+    out = await _call(tools.delegate)(_Ctx(rt), intent="order_pizza", brief="pepperoni")
+    assert not gw.delegated  # never reached the gateway
+    assert rt.tools_log.calls[-1].status == "error"
+    assert "can't delegate" in out.lower()
+
+
+async def test_delegate_degrades_when_gateway_unconfigured():
+    rt = _runtime(_FakeBackend(), gateway=None)
+    out = await _call(tools.delegate)(_Ctx(rt), intent="echo", brief="hi")
+    assert "can't hand work" in out.lower()
+    assert rt.tools_log.calls[-1].status == "error"
+
+
+async def test_delegate_degrades_on_gateway_error():
+    gw = _FakeGateway(fail=BackendError("the task gateway timed out"))
+    rt = _runtime(_FakeBackend(), gateway=gw)
+    out = await _call(tools.delegate)(_Ctx(rt), intent="read_git", brief="who owns auth")
+    assert "couldn't hand that off" in out.lower()
+    assert rt.tools_log.calls[-1].status == "error"
 
 
 def test_summarizer_handles_empty():

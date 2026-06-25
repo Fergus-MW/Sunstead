@@ -127,6 +127,72 @@ async def record_action_item(
         return f"Done — I've recorded the action item{who}."
 
 
+# Maps each delegatable intent to the arg key the receiving worker reads from the
+# task payload (web-agent reads `brief`, git/data read `question`, echo is dev).
+# Must stay a subset of the controlled `TaskIntent` vocab in
+# agent-system/shared/contracts.py — the gateway re-validates and rejects others.
+DELEGATE_ARG_KEY = {
+    "build_website": "brief",
+    "update_website": "brief",
+    "read_git": "question",
+    "who_changed": "question",
+    "recent_changes": "question",
+    "blame": "question",
+    "analyze": "question",
+    "summarize_metrics": "question",
+    "query_data": "question",
+    "echo": "text",
+}
+
+
+@function_tool
+async def delegate(context: RunContext[AgentRuntime], intent: str, brief: str) -> str:
+    """Hand a piece of real work off to the specialist agent team, who do it in
+    the background while the meeting continues. Use this when a participant asks
+    you to BUILD or DO something that takes real work, not just answer a question
+    you can look up. The result appears on the team's dashboard shortly after.
+
+    Choose the closest `intent`:
+      - build_website: create a new web page / landing site from a description.
+      - update_website: change a site that was already built.
+      - read_git / who_changed / recent_changes / blame: deeper questions about
+        the codebase's history than a quick lookup (who last touched a module, what
+        changed recently). Prefer `lookup_context` for simple facts.
+      - analyze / summarize_metrics / query_data: crunch or summarize data.
+
+    This is fire-and-forget: confirm out loud that you're on it (the team will put
+    the result on screen) — do not promise to read the result back yourself.
+
+    Args:
+        intent: One of the intents listed above.
+        brief: A clear, self-contained description of what to build or do, in your
+            own words, capturing what the participant asked for.
+    """
+    rt = context.userdata
+    arg_key = DELEGATE_ARG_KEY.get(intent)
+    async with rt.tools_log.span("delegate", {"intent": intent, "brief": brief}) as call:
+        if arg_key is None:
+            call.fail(f"unknown intent {intent!r}")
+            return (
+                "I can't delegate that kind of task — I can build or update a site, "
+                "dig into the code history, or analyze data."
+            )
+        if rt.gateway is None or not rt.gateway.enabled:
+            call.fail("delegation not configured")
+            return "I can't hand work to the team right now — the task service isn't reachable."
+        try:
+            data = await rt.gateway.delegate(
+                intent=intent,
+                args={arg_key: brief},
+                meeting_id=rt.meeting_id,
+            )
+        except BackendError as exc:
+            call.fail(exc.reason)
+            return f"I couldn't hand that off to the team just now — {exc.reason}. Want me to try again?"
+        call.ok(data)
+        return "On it — I've handed that to the team and it'll show up on the dashboard shortly."
+
+
 # The registry the Agent is built from. Append a function here to expose a new
 # tool; nothing else in the pipeline changes (CT-3).
 BACKEND_TOOLS = [
@@ -134,6 +200,7 @@ BACKEND_TOOLS = [
     get_entity,
     recent_activity,
     record_action_item,
+    delegate,
 ]
 
 

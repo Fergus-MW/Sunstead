@@ -34,12 +34,28 @@ MEET_PATTERN = re.compile(
     r"^https://meet\.google\.com/([a-z]{3}-[a-z]{4}-[a-z]{3})(\?.*)?$", re.IGNORECASE
 )
 
+# The canonical meeting key is the Meet code (e.g. "abc-defg-hij"). The LiveKit
+# room is that key with this prefix; `meeting_id_for_room` reverses it. Keeping the
+# mapping here (one place) means the worker (agent.py), the gateway, and the FE WS
+# filter all agree on `meeting_id`, so a delegated result correlates to the call.
+ROOM_PREFIX = "avatar-"
 
-def _room_for(meeting_url: str) -> str:
+
+def meeting_id_for(meeting_url: str) -> str:
+    """The canonical meeting_id (the Meet code) for a meeting URL."""
     match = MEET_PATTERN.match(meeting_url.strip())
     if not match:
         raise ValueError("not a valid Google Meet link (expected meet.google.com/xxx-xxxx-xxx)")
-    return f"avatar-{match.group(1).lower()}"
+    return match.group(1).lower()
+
+
+def meeting_id_for_room(room: str) -> str:
+    """Reverse of `_room_for`: the meeting_id a LiveKit room name encodes."""
+    return room[len(ROOM_PREFIX):] if room.startswith(ROOM_PREFIX) else room
+
+
+def _room_for(meeting_url: str) -> str:
+    return f"{ROOM_PREFIX}{meeting_id_for(meeting_url)}"
 
 
 def _viewer_token(room: str) -> str:
@@ -68,18 +84,27 @@ def _viewer_url(room: str) -> str:
 
 
 async def dispatch_bot(meeting_url: str) -> dict:
-    """Send the avatar into `meeting_url`. Returns {bot_id, room, viewer_url}.
+    """Send the avatar into `meeting_url`. Returns {bot_id, room, meeting_id, viewer_url}.
+
+    `meeting_id` is the canonical key the FE subscribes to (`WS /stream?meeting_id=`)
+    so the avatar's delegated results land against the right call.
 
     Reused by both the `dispatch-bot` CLI and the AWS Lambda Function URL handler
     (lambda_dispatch.py), so the join logic lives in exactly one place.
     """
     cfg = settings()
-    room = _room_for(meeting_url)  # raises ValueError on a bad link
+    meeting_id = meeting_id_for(meeting_url)  # raises ValueError on a bad link
+    room = _room_for(meeting_url)
     viewer_url = _viewer_url(room)
     bot = await RecallClient(settings=cfg).create_bot(
         meeting_url=meeting_url, viewer_url=viewer_url
     )
-    return {"bot_id": bot.get("id"), "room": room, "viewer_url": viewer_url}
+    return {
+        "bot_id": bot.get("id"),
+        "room": room,
+        "meeting_id": meeting_id,
+        "viewer_url": viewer_url,
+    }
 
 
 async def leave_bot(bot_id: str) -> None:
@@ -90,9 +115,10 @@ async def leave_bot(bot_id: str) -> None:
 async def _join(meeting_url: str) -> None:
     result = await dispatch_bot(meeting_url)
     print(f"✅ bot dispatched to {meeting_url}")
-    print(f"   bot id : {result['bot_id']}")
-    print(f"   room   : {result['room']}")
-    print(f"   viewer : {result['viewer_url'][:80]}…")
+    print(f"   bot id     : {result['bot_id']}")
+    print(f"   room       : {result['room']}")
+    print(f"   meeting_id : {result['meeting_id']}")
+    print(f"   viewer     : {result['viewer_url'][:80]}…")
 
 
 async def _leave(bot_id: str) -> None:

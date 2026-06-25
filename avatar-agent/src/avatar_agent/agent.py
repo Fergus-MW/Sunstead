@@ -28,6 +28,8 @@ from livekit.plugins import anam
 from .backend import BackendClient
 from .config import Settings, settings
 from .observability import CallArtifact, ToolCallLog
+from .dispatch import meeting_id_for_room
+from .gateway import GatewayClient
 from .runtime import AgentRuntime
 from .tools import BACKEND_TOOLS
 
@@ -42,8 +44,11 @@ INSTRUCTIONS = (
     "When someone asks about company data — people, projects, tasks, code, documents, "
     "or recent activity — use your tools to look it up before answering, and speak the "
     "result naturally. Only record an action item when you are explicitly asked to "
-    "capture a task or follow-up. If a tool fails, say so briefly and carry on; never "
-    "invent data you couldn't retrieve."
+    "capture a task or follow-up. When someone asks you to BUILD or DO real work — a "
+    "web page, a code-history investigation, a data analysis — use the delegate tool "
+    "to hand it to the specialist team, and say you're on it; the result shows up on "
+    "their dashboard. If a tool fails, say so briefly and carry on; never invent data "
+    "you couldn't retrieve."
 )
 
 # Silero VAD is expensive to construct; cache it across jobs in the worker
@@ -100,11 +105,19 @@ async def entrypoint(ctx: JobContext) -> None:
     cfg = settings()
     ctx.log_context_fields = {"room": ctx.room.name}
 
-    # Per-session runtime: a backend client + a tool-call log, reachable from
+    # Per-session runtime: a backend client (KG reads), a delegation gateway
+    # client (hand work to the worker suite), the canonical meeting_id (so results
+    # correlate to this call on the FE), and a tool-call log — all reachable from
     # every tool via RunContext.userdata.
     backend = BackendClient(settings=cfg)
+    gateway = GatewayClient(settings=cfg)
     tools_log = ToolCallLog()
-    runtime = AgentRuntime(backend=backend, tools_log=tools_log)
+    runtime = AgentRuntime(
+        backend=backend,
+        tools_log=tools_log,
+        gateway=gateway,
+        meeting_id=meeting_id_for_room(ctx.room.name),
+    )
     artifact = CallArtifact(room=ctx.room.name, tools_log=tools_log)
 
     session = build_session(cfg, runtime)
@@ -122,6 +135,7 @@ async def entrypoint(ctx: JobContext) -> None:
             logger.exception("failed to capture transcript")
         artifact.write(cfg.artifact_dir)
         await backend.aclose()
+        await gateway.aclose()
 
     ctx.add_shutdown_callback(_on_shutdown)
 
