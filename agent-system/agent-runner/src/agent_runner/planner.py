@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+from collections import OrderedDict, deque
 
 from shared import config
 from shared.contracts import (
@@ -37,6 +38,13 @@ log = logging.getLogger("planner")
 # The planner may delegate any real intent — but never `echo` (a no-op smoke intent).
 PLANNABLE_INTENTS: list[str] = [i for i in config.TASK_TOPIC_BY_INTENT if i != "echo"]
 
+# meeting-ops intents need the meeting so far, not just the triggering utterance — the planner
+# keeps a rolling per-meeting transcript and attaches it to these tasks (the agent stays stateless).
+OPS_INTENTS = {"recap", "action_items", "decisions"}
+TRANSCRIPT_WINDOW = 80  # recent final utterances kept per meeting
+MAX_MEETINGS = 64       # distinct meetings tracked (LRU) — bounds memory in a long-lived planner
+SEEN_MAX = 4096         # transcript-id dedupe window (FIFO) — bounds memory, same reason
+
 PLANNER_SYSTEM = f"""You are the planner for Sunstead — an AI employee that sits in a live meeting and \
 delegates work to a suite of specialist agents. You read one utterance from the meeting transcript and \
 decide whether it contains a concrete, actionable request the agents can fulfil right now.
@@ -49,8 +57,15 @@ Agents and the intents they handle:
     args: {{"brief": "<what the site is for>", "style": "<optional look & feel>"}}
 - git-agent — `who_changed`, `blame`, `read_git`, `recent_changes` (questions about the codebase / its history,
     answered from a knowledge graph). args: {{"question": "<the natural-language question>"}}
-- data-agent — `analyze`, `summarize_metrics`, `query_data` (questions about metrics / data).
-    args: {{"question": "<the natural-language question>"}}
+- data-agent — `analyze`, `summarize_metrics`, `query_data` (questions about metrics / data — answered
+    with a chart). args: {{"question": "<the natural-language question>"}}
+- meeting-ops — `recap` (summarise the meeting so far), `action_items` (capture who-owns-what),
+    `decisions` (record what was decided). Use when someone asks to recap / capture actions / note a
+    decision. args: {{}} — the transcript is attached automatically; do not put it in args.
+- research-agent — `research` (look something up on the live web — current facts, prices, news,
+    docs, competitors). Use for anything needing up-to-date external info the codebase/graph wouldn't
+    have. args: {{"question": "<the natural-language question>"}}. Prefer git-agent for questions about
+    OUR codebase/meetings, and research-agent for the outside world.
 
 One utterance may imply more than one task (e.g. "build a landing page and tell me who owns auth" → two tasks).
 Rewrite each request into a clean, self-contained `question`/`brief` — the agent does not see the conversation."""
@@ -142,7 +157,32 @@ async def main() -> None:
     anthropic = AsyncAnthropic(**kwargs)
 
     producer = await make_producer(s)
-    seen: set[str] = set()  # envelope-id dedupe — a redelivered transcript must not double-delegate
+
+    # Both structures are bounded so a long-lived planner never grows without limit.
+    seen: set[str] = set()           # envelope-id dedupe — a redelivered transcript mustn't double-delegate
+    seen_order: deque[str] = deque()  # insertion order, to FIFO-evict `seen` past SEEN_MAX
+    transcripts: OrderedDict[str, deque] = OrderedDict()  # per-meeting rolling window, LRU over meetings
+
+    def first_time(env_id: str) -> bool:
+        """True the first time we see an envelope id; evicts the oldest id past SEEN_MAX."""
+        if env_id in seen:
+            return False
+        seen.add(env_id)
+        seen_order.append(env_id)
+        if len(seen_order) > SEEN_MAX:
+            seen.discard(seen_order.popleft())
+        return True
+
+    def roll(meeting_id: str) -> deque:
+        """The meeting's rolling transcript, kept as an LRU over meetings (cap MAX_MEETINGS)."""
+        dq = transcripts.get(meeting_id)
+        if dq is None:
+            dq = transcripts[meeting_id] = deque(maxlen=TRANSCRIPT_WINDOW)
+            if len(transcripts) > MAX_MEETINGS:
+                transcripts.popitem(last=False)  # drop the least-recently-used meeting
+        else:
+            transcripts.move_to_end(meeting_id)
+        return dq
 
     log.info("planner up — tailing %s (group=planner, bootstrap=%s)", config.TRANSCRIPT, s.kafka.bootstrap)
     try:
@@ -158,9 +198,12 @@ async def main() -> None:
             if env.type != "transcript.final" and not env.payload.is_final:
                 continue
             text = (env.payload.text or "").strip()
-            if len(text) < 8 or env.id in seen:
+            if len(text) < 8 or not first_time(env.id):
                 continue
-            seen.add(env.id)
+
+            # record the utterance in the meeting's rolling transcript before planning
+            speaker = (env.payload.speaker.name if env.payload.speaker else None) or "Speaker"
+            roll(env.meeting_id).append(f"{speaker}: {text}")
 
             try:
                 tasks = await plan_utterance(anthropic, s.model_smart, text)
@@ -172,6 +215,9 @@ async def main() -> None:
 
             plan_id = "plan_" + uuid.uuid4().hex[:8]
             for spec in tasks:
+                # meeting-ops needs the whole meeting — attach the rolling transcript window
+                if spec.get("intent") in OPS_INTENTS:
+                    spec.setdefault("args", {})["transcript"] = "\n".join(transcripts[env.meeting_id])
                 try:
                     await _delegate(producer, env.meeting_id, plan_id, spec)
                 except Exception as e:

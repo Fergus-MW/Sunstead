@@ -51,6 +51,8 @@ TaskIntent = Literal[
     "analyze", "summarize_metrics", "query_data",            # data-agent
     "read_git", "blame", "who_changed", "recent_changes",    # git-agent (code questions)
     "ask",                                                   # general KG question (any node/edge type)
+    "recap", "action_items", "decisions",                    # meeting-ops (transcript → outcomes → KG)
+    "research",                                               # research agent (live web search)
 ]
 
 
@@ -73,12 +75,26 @@ class Artifact(BaseModel):
     value: str
 
 
+class Verdict(BaseModel):
+    """The verifier's grounding judgement on an answer (docs/DESIGN.md §7).
+
+    Annotate-only / fail-open: we surface confidence, we don't block. `grounded=False`
+    means a factual assertion in the answer wasn't supported by the evidence the agent
+    actually retrieved; `evidence_count` is how many tool results were checked against.
+    """
+    grounded: bool
+    confidence: float                                      # 0..1, the verifier's certainty
+    evidence_count: int = 0
+    note: str | None = None
+
+
 class TaskResultPayload(BaseModel):
     task_id: str
     status: Literal["completed", "failed"]
     result: dict | None = None
     artifacts: list[Artifact] = Field(default_factory=list)
     error: str | None = None
+    verdict: Verdict | None = None                         # grounding check, when evidence was present
 
 
 class ActivityPayload(BaseModel):
@@ -102,6 +118,29 @@ class TracePayload(BaseModel):
     delta: str
 
 
+class VerdictPayload(BaseModel):
+    """An async grounding verdict for an already-emitted result (docs/DESIGN.md §7).
+
+    The answer is emitted immediately; the verifier runs off the critical path and the
+    verdict follows as this event — so the check never delays the answer (the §2 tempo
+    rule: never put a slow verifier in front of the spoken/displayed result). The FE
+    applies it to the task by `task_id`.
+    """
+    task_id: str
+    verdict: Verdict
+
+
+class ControlPayload(BaseModel):
+    """Operator/conductor command targeting a running task (docs/DESIGN.md §7).
+
+    The control channel turns oversight from observe-only into *act*: `cancel` stops a
+    task mid-flight. Routed by `task_id`; the runner that owns that task honours it.
+    """
+    task_id: str
+    action: Literal["cancel"]
+    reason: str | None = None
+
+
 class KgUpdatePayload(BaseModel):
     """Async 'write this fact to the graph' — consumed by central-kg-api."""
     node_key: str
@@ -111,7 +150,7 @@ class KgUpdatePayload(BaseModel):
 
 Payload = Union[
     TranscriptPayload, MeetingEventPayload, TaskCreatePayload,
-    TaskResultPayload, ActivityPayload, TracePayload, KgUpdatePayload,
+    TaskResultPayload, ActivityPayload, TracePayload, VerdictPayload, ControlPayload, KgUpdatePayload,
 ]
 
 # --- envelope -------------------------------------------------------------
@@ -122,6 +161,8 @@ MessageType = Literal[
     "task.create", "task.completed", "task.failed",
     "activity",
     "trace",
+    "verdict",
+    "control",
     "kg.update",
 ]
 

@@ -29,13 +29,16 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
 from shared import config
-from shared.contracts import Envelope, Speaker, TaskCreatePayload, TaskIntent, TranscriptPayload
+from shared.contracts import (
+    ControlPayload, Envelope, Speaker, TaskCreatePayload, TaskIntent, TranscriptPayload,
+)
 from shared.harness import now_iso
 from shared.kafka import consume, make_producer, publish
 
 log = logging.getLogger("gateway")
 
 RING_SIZE = 200          # recent envelopes replayed to a newly-connected socket
+TRACE_RING_SIZE = 400    # trace deltas kept separate so a build burst can't evict results/activity
 CLIENT_QUEUE_MAX = 500   # per-socket backlog before we drop (a stalled browser can't back up Kafka)
 
 
@@ -55,6 +58,14 @@ class TranscriptRequest(BaseModel):
     is_final: bool = True
 
 
+class ControlRequest(BaseModel):
+    """An operator/conductor command (FE "stop" button) → `agent.control` (docs/DESIGN.md §7)."""
+    task_id: str
+    action: str = "cancel"
+    meeting_id: str = "mtg_dev"
+    reason: str | None = None
+
+
 # A fanned-out stream item: (meeting_id, envelope_id, raw_json_text). The id lets a socket dedupe the small
 # overlap between its replay snapshot and the live feed; the meeting_id drives the per-socket filter.
 Item = tuple[str, str, str]
@@ -69,6 +80,7 @@ class Hub:
     def __init__(self, settings: config.Settings):
         self.settings = settings
         self.ring: deque[Item] = deque(maxlen=RING_SIZE)
+        self.trace_ring: deque[Item] = deque(maxlen=TRACE_RING_SIZE)
         self.clients: set[asyncio.Queue[Item]] = set()
         self._task: asyncio.Task | None = None
 
@@ -91,8 +103,9 @@ class Hub:
     def unregister(self, q: asyncio.Queue) -> None:
         self.clients.discard(q)
 
-    def _fanout(self, item: Item) -> None:
-        self.ring.append(item)
+    def _fanout(self, item: Item, *, is_trace: bool = False) -> None:
+        # trace is high-volume; its own ring so a build burst can't evict result/activity replay
+        (self.trace_ring if is_trace else self.ring).append(item)
         for q in self.clients:
             try:
                 q.put_nowait(item)
@@ -108,7 +121,9 @@ class Hub:
         q = self.register()
         try:
             replayed: set[str] = set()
-            for mid, eid, text in list(self.ring):
+            # results/activity first so task rows fold even if trace replay is large; the FE
+            # folds trace by seq and re-sorts tasks by ts, so this ordering is presentation-only.
+            for mid, eid, text in [*self.ring, *self.trace_ring]:
                 if meeting_id is None or mid == meeting_id:
                     replayed.add(eid)
                     yield text
@@ -127,12 +142,18 @@ class Hub:
         group = f"gateway-broadcast-{uuid.uuid4().hex[:8]}"
         while True:  # stay up across a flaky/late Kafka — the FE degrades gracefully meanwhile
             try:
-                async for msg in consume(config.RESULTS, config.ACTIVITY, config.TRACE, config.TRANSCRIPT,
+                # Also tail the task topics so `task.create` (the dispatch moment) reaches the FE:
+                # the board shows a task the instant it's dispatched — not only once a runner emits
+                # its first activity — so one sent to a down/slow runner still appears (then stalls).
+                async for msg in consume(config.RESULTS, config.ACTIVITY, config.TRACE,
+                                         config.CONTROL, config.TRANSCRIPT,
+                                         *config.TASK_TOPICS,
                                          group_id=group, settings=self.settings,
                                          auto_offset_reset="latest"):
                     try:
                         env = Envelope.model_validate_json(msg.value)   # validate, but never let one bad frame...
-                        self._fanout((env.meeting_id, env.id, msg.value.decode()))
+                        self._fanout((env.meeting_id, env.id, msg.value.decode()),
+                                     is_trace=env.type == "trace")
                     except Exception as e:  # ...kill the feed for everyone else
                         log.warning("skipping unparseable %s message: %s", msg.topic, e)
             except asyncio.CancelledError:
@@ -193,6 +214,17 @@ async def post_transcript(req: TranscriptRequest) -> dict:
     )
     await publish(app.state.producer, config.TRANSCRIPT, env, key=req.meeting_id)
     return {"status": "accepted", "topic": config.TRANSCRIPT}
+
+
+@app.post("/control")
+async def control(req: ControlRequest) -> dict:
+    """Send a command to a running task (the FE "stop" button) → `agent.control`."""
+    env = Envelope[ControlPayload](
+        type="control", meeting_id=req.meeting_id, ts=now_iso(),
+        payload=ControlPayload(task_id=req.task_id, action="cancel", reason=req.reason),
+    )
+    await publish(app.state.producer, config.CONTROL, env, key=req.task_id)
+    return {"status": "accepted", "task_id": req.task_id, "action": "cancel"}
 
 
 @app.websocket("/stream")

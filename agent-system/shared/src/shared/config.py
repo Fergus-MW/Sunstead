@@ -18,20 +18,23 @@ MEETING_EVENTS = "meeting.events"
 TASKS_WEB = "agent.tasks.web"
 TASKS_DATA = "agent.tasks.data"
 TASKS_GIT = "agent.tasks.git"
+TASKS_OPS = "agent.tasks.ops"        # meeting-ops (recap / action items / decisions)
+TASKS_RESEARCH = "agent.tasks.research"  # research agent (live web search)
 TASKS_DEV = "agent.tasks.dev"        # dev/echo (no creds)
 RESULTS = "agent.results"
 ACTIVITY = "agent.activity"          # visible status feed to the FE
 TRACE = "agent.trace"                # streamed reasoning/output deltas to the FE
+CONTROL = "agent.control"            # operator/conductor commands (cancel) → the runner
 KG_UPDATES = "kg.updates"
 
 # topics our agent-runner CONSUMES
-TASK_TOPICS: list[str] = [TASKS_WEB, TASKS_DATA, TASKS_GIT, TASKS_DEV]
+TASK_TOPICS: list[str] = [TASKS_WEB, TASKS_DATA, TASKS_GIT, TASKS_OPS, TASKS_RESEARCH, TASKS_DEV]
 
 # every topic the admin script ensures exists
 ALL_TOPICS: list[str] = [
     TRANSCRIPT, MEETING_EVENTS,
-    TASKS_WEB, TASKS_DATA, TASKS_GIT, TASKS_DEV,
-    RESULTS, ACTIVITY, TRACE, KG_UPDATES,
+    TASKS_WEB, TASKS_DATA, TASKS_GIT, TASKS_OPS, TASKS_RESEARCH, TASKS_DEV,
+    RESULTS, ACTIVITY, TRACE, CONTROL, KG_UPDATES,
 ]
 
 # intent -> the task topic a producer should publish to
@@ -41,6 +44,8 @@ TASK_TOPIC_BY_INTENT = {
     "analyze": TASKS_DATA, "summarize_metrics": TASKS_DATA, "query_data": TASKS_DATA,
     "read_git": TASKS_GIT, "blame": TASKS_GIT, "who_changed": TASKS_GIT, "recent_changes": TASKS_GIT,
     "ask": TASKS_GIT,    # general KG question -> same agent/topic as git (the agent is general)
+    "recap": TASKS_OPS, "action_items": TASKS_OPS, "decisions": TASKS_OPS,  # meeting-ops
+    "research": TASKS_RESEARCH,                                              # research agent
 }
 
 

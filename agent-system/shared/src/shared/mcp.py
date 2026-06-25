@@ -16,9 +16,39 @@ from __future__ import annotations
 
 import os
 from contextlib import AsyncExitStack
-from typing import Any
+from typing import Any, Callable
 
 from . import config
+
+
+class _RecordingSession:
+    """Transparent proxy around an MCP ClientSession that records each tool result.
+
+    The tool-runner executes MCP tools via `session.call_tool(...)`; the rows those calls
+    return are the *evidence* the grounding verifier (docs/DESIGN.md §7) checks an answer
+    against — but they're produced inside the runner and otherwise discarded. Wrapping the
+    session per task captures them without coupling to the runner's internals; everything
+    other than `call_tool` delegates straight through.
+    """
+
+    def __init__(self, session: Any, on_result: Callable[[str, dict, str], None]):
+        self._session = session
+        self._on_result = on_result
+
+    async def call_tool(self, name: str, arguments: dict | None = None, **kw: Any) -> Any:
+        result = await self._session.call_tool(name, arguments=arguments, **kw)
+        try:
+            text = "".join(
+                getattr(c, "text", "") for c in (result.content or [])
+                if getattr(c, "type", None) == "text"
+            )
+            self._on_result(name, arguments or {}, text)
+        except Exception:
+            pass  # capture is best-effort — never break a tool call to record it
+        return result
+
+    def __getattr__(self, item: str) -> Any:
+        return getattr(self._session, item)
 
 
 class AivenMCP:
@@ -81,9 +111,12 @@ class AivenMCP:
 
     # --- LLM-exposed (tool-runner) -----------------------------------------
 
-    def llm_tools(self) -> list[Any]:
+    def llm_tools(self, on_result: Callable[[str, dict, str], None] | None = None) -> list[Any]:
+        """Tools for the anthropic tool-runner. Pass `on_result` to capture each tool's
+        result (name, args, text) per task — used to feed the grounding verifier."""
         from anthropic.lib.tools.mcp import async_mcp_tool
-        return [async_mcp_tool(t, self.session) for t in self._tools]
+        session = self.session if on_result is None else _RecordingSession(self.session, on_result)
+        return [async_mcp_tool(t, session) for t in self._tools]
 
     def tool_schemas(self) -> dict[str, Any]:
         """name -> input schema, for discovery (used by the connectivity spike)."""

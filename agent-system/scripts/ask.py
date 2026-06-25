@@ -31,6 +31,12 @@ class CliCtx:
     async def activity(self, status: str, detail: str | None = None) -> None:
         print(f"  · {status}" + (f": {detail}" if detail else ""))
 
+    async def trace(self, phase: str, delta: str) -> None:
+        # The agent streams reasoning/output deltas to agent.trace via ctx.trace();
+        # this one-shot slice prints the final answer below, so swallow live deltas
+        # (without this no-op the agent's ctx.trace(...) call AttributeErrors here).
+        pass
+
 
 async def main() -> None:
     ap = argparse.ArgumentParser()

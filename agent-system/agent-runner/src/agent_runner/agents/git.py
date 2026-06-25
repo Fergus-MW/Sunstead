@@ -51,18 +51,41 @@ async def run(task: TaskCreatePayload, ctx: TaskCtx) -> dict:
     question = task.args.get("question") or task.args.get("q") or task.intent
     await ctx.activity("querying the knowledge graph")
 
+    # Capture the rows each aiven_pg_read returns — these are the *evidence* the grounding
+    # verifier checks the answer against (docs/DESIGN.md §7), otherwise lost inside the runner.
+    evidence: list[str] = []
+
+    def _record(name: str, args: dict, text: str) -> None:
+        q = (args.get("query") or args.get("sql") or "").strip()
+        head = f"{name}: {q[:160]}" if q else name
+        evidence.append(f"[{head}]\n{text[:2000]}")
+
     runner = ctx.anthropic.beta.messages.tool_runner(
         model=ctx.settings.model_fast,
         max_tokens=2048,
         system=KG_SYSTEM,
-        tools=ctx.mcp.llm_tools(),
+        tools=ctx.mcp.llm_tools(on_result=_record),
         messages=[{"role": "user", "content": question}],
     )
 
+    # Forward each turn's blocks to agent.trace so the dashboard shows the agent working.
+    # This is per-turn (coarse), not token-by-token: the Python tool runner yields complete
+    # messages per turn, and model_fast (Haiku 4.5) doesn't take adaptive thinking/effort.
+    # For true token-streamed reasoning here, swap to a manual stream() tool loop on a
+    # thinking-capable model (docs/AGENT_SYSTEM.md §3.5).
     answer = ""
     async for message in runner:
         for block in message.content:
-            if block.type == "text" and block.text.strip():
+            if block.type == "thinking" and getattr(block, "thinking", "").strip():
+                await ctx.trace("thinking", block.thinking)
+            elif block.type == "text" and block.text.strip():
+                await ctx.trace("text", block.text)
                 answer = block.text
 
-    return {"question": question, "answer": answer}
+    # `_verify` is consumed by the harness pre-emit gate (docs/DESIGN.md §7) and stripped
+    # from the emitted result — the grounding check runs against the rows we captured above.
+    return {
+        "question": question,
+        "answer": answer,
+        "_verify": {"claim": answer, "evidence": evidence},
+    }

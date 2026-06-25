@@ -9,9 +9,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import uuid
 
 from shared import config
-from shared.contracts import Envelope, TaskCreatePayload
+from shared.contracts import ControlPayload, Envelope, TaskCreatePayload
 from shared.harness import AgentContext, run_task
 from shared.kafka import consume, make_producer
 
@@ -28,6 +29,35 @@ async def _process(env: Envelope[TaskCreatePayload], ctx: AgentContext, sem: asy
             async def agent(task, ctx, _e=e):  # surface "no agent" as a failed result
                 raise _e
         await run_task(env, agent, ctx)
+
+
+async def _control_loop(running: dict[str, asyncio.Task], settings: config.Settings) -> None:
+    """Tail `agent.control` and cancel the matching in-flight task (docs/DESIGN.md §7).
+
+    A **broadcast** group (unique per process) so every runner instance sees every command —
+    the runner that actually owns the task_id cancels it; others no-op. Cancellation lands at
+    the agent's next await (LLM stream / tool call), and the harness emits a terminal result.
+    """
+    group = f"agent-control-{uuid.uuid4().hex[:8]}"
+    while True:  # stay up across a flaky Kafka, like the gateway broadcast consumer
+        try:
+            async for msg in consume(config.CONTROL, group_id=group, settings=settings,
+                                     auto_offset_reset="latest"):
+                try:
+                    env = Envelope[ControlPayload].model_validate_json(msg.value)
+                except Exception as e:
+                    log.warning("dropping unparseable control message: %s", e)
+                    continue
+                if env.payload.action == "cancel":
+                    t = running.get(env.payload.task_id)
+                    if t and not t.done():
+                        log.info("cancelling task %s (reason=%s)", env.payload.task_id, env.payload.reason)
+                        t.cancel()
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            log.warning("control loop error (%s) — retrying", e)
+            await asyncio.sleep(2)
 
 
 async def main() -> None:
@@ -57,10 +87,12 @@ async def main() -> None:
 
     ctx = AgentContext(s, producer, mcp, anthropic_client)
     sem = asyncio.Semaphore(s.max_concurrency)
-    tasks: set[asyncio.Task] = set()
+    running: dict[str, asyncio.Task] = {}                   # task_id -> task, so the control channel can cancel
 
-    log.info("agent-runner up — consuming %s (group=%s, bootstrap=%s)",
-             config.TASK_TOPICS, s.consumer_group, s.kafka.bootstrap)
+    control = asyncio.create_task(_control_loop(running, s), name="agent-control")
+
+    log.info("agent-runner up — consuming %s (group=%s, bootstrap=%s); control on %s",
+             config.TASK_TOPICS, s.consumer_group, s.kafka.bootstrap, config.CONTROL)
     try:
         async for msg in consume(*config.TASK_TOPICS, group_id=s.consumer_group,
                                  settings=s, auto_offset_reset="latest"):
@@ -69,10 +101,16 @@ async def main() -> None:
             except Exception as e:
                 log.warning("dropping unparseable message on %s: %s", msg.topic, e)
                 continue
+            tid = env.payload.task_id
             t = asyncio.create_task(_process(env, ctx, sem))
-            tasks.add(t)
-            t.add_done_callback(tasks.discard)
+            running[tid] = t
+            # Pop only if we're still the registered task for this id. Under at-least-once
+            # redelivery a duplicate overwrites running[tid], skips fast via idempotency, and its
+            # done-callback would otherwise evict the *original* still-running task — leaving it
+            # uncancellable. The identity guard keeps the live task reachable by _control_loop.
+            t.add_done_callback(lambda done, _tid=tid: running.get(_tid) is done and running.pop(_tid, None))
     finally:
+        control.cancel()
         await producer.stop()
         if mcp:
             await mcp.stop()

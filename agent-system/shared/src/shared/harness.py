@@ -11,15 +11,18 @@ Emits (`agent.activity`, `agent.results`) are **direct Kafka produces** — no L
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 from typing import Awaitable, Callable
 
 from . import config
 from .contracts import (
-    ActivityPayload, Artifact, Envelope, TaskCreatePayload, TaskResultPayload, TracePayload,
+    ActivityPayload, Artifact, Envelope, TaskCreatePayload, TaskResultPayload,
+    TracePayload, VerdictPayload,
 )
 from .kafka import publish
 from .sessions import SessionStore
+from .verify import verify_grounding
 
 
 def now_iso() -> str:
@@ -36,6 +39,7 @@ class AgentContext:
         self.anthropic = anthropic          # AsyncAnthropic | None
         self.store = SessionStore(settings.sessions_dir)
         self._seen: set[str] = set()        # idempotency (in-memory; durable later)
+        self._bg: set[asyncio.Task] = set()  # detached post-emit work (async verifier), kept referenced
 
     async def _activity(self, meeting_id: str, task_id: str, status: str, detail: str | None) -> None:
         env = Envelope[ActivityPayload](
@@ -57,6 +61,29 @@ class AgentContext:
             meeting_id=meeting_id, ts=now_iso(), payload=payload,
         )
         await publish(self.producer, reply_to, env, key=payload.task_id)
+
+    async def _emit_verdict(self, meeting_id: str, reply_to: str, task_id: str, verdict) -> None:
+        env = Envelope[VerdictPayload](
+            type="verdict", meeting_id=meeting_id, ts=now_iso(),
+            payload=VerdictPayload(task_id=task_id, verdict=verdict),
+        )
+        await publish(self.producer, reply_to, env, key=task_id)
+
+    def schedule_verify(self, meeting_id: str, reply_to: str, task_id: str, verify: dict) -> None:
+        """Run the grounding check OFF the critical path (docs/DESIGN.md §7) and emit the
+        verdict as a follow-up — the answer is already out, so the check never delays it."""
+        async def _run() -> None:
+            try:
+                verdict = await verify_grounding(
+                    self.anthropic, model=self.settings.model_fast,
+                    claim=verify.get("claim", ""), evidence=verify.get("evidence", []) or [],
+                )
+                await self._emit_verdict(meeting_id, reply_to, task_id, verdict)
+            except Exception:
+                pass  # post-hoc and fail-open — a broken verifier never disturbs the answer
+        t = asyncio.create_task(_run())
+        self._bg.add(t)
+        t.add_done_callback(self._bg.discard)
 
 
 class TaskCtx:
@@ -97,14 +124,28 @@ async def run_task(env: Envelope[TaskCreatePayload], agent: AgentFn, ctx: AgentC
     await tctx.activity("received", task.intent)
     try:
         result: dict = await agent(task, tctx)              # plan → act → verify (specialist)
+        # A specialist that wants its answer grounding-checked returns `_verify={claim, evidence}`.
+        verify = result.pop("_verify", None) if isinstance(result, dict) else None
         artifacts = (
             [Artifact(**a) for a in (result.pop("artifacts", []) or [])]
             if isinstance(result, dict) else []
         )
+        # Emit the answer NOW. The grounding check (docs/DESIGN.md §7) runs off the critical
+        # path and its verdict follows as a separate `verdict` event — so verification never
+        # delays the answer (the §2 tempo rule: no slow verifier in front of the result).
         await ctx._emit_result(env.meeting_id, task.reply_to, TaskResultPayload(
             task_id=task.task_id, status="completed", result=result, artifacts=artifacts,
         ))
         await tctx.activity("completed")
+        if isinstance(verify, dict) and ctx.anthropic is not None:
+            ctx.schedule_verify(env.meeting_id, task.reply_to, task.task_id, verify)
+    except asyncio.CancelledError:                          # operator/conductor stop (docs/DESIGN.md §7)
+        # Emit a terminal result so the FE stops showing the task in-flight, then honour the cancel.
+        await ctx._emit_result(env.meeting_id, task.reply_to, TaskResultPayload(
+            task_id=task.task_id, status="failed", error="cancelled by operator",
+        ))
+        await tctx.activity("cancelled")
+        raise
     except Exception as e:                                  # surface failures, never crash the loop
         await ctx._emit_result(env.meeting_id, task.reply_to, TaskResultPayload(
             task_id=task.task_id, status="failed", error=f"{type(e).__name__}: {e}",
