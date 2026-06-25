@@ -1,0 +1,9 @@
+# Caddy auto-issues a Let's Encrypt cert for the LiveKit signaling domain and
+# reverse-proxies the WebSocket endpoint. Gives wss://${livekit_domain}.
+{
+	email ${acme_email}
+}
+
+${livekit_domain} {
+	reverse_proxy localhost:7880
+}

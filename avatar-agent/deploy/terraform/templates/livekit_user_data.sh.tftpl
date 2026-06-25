@@ -1,0 +1,48 @@
+#!/bin/bash
+set -euxo pipefail
+
+# Bootstrap a single-node LiveKit SFU on Amazon Linux 2023 using Docker Compose.
+# LiveKit + Caddy (auto-TLS). Config is rendered by Terraform; secrets are baked
+# in via the rendered livekit.yaml (visible only to root on the box).
+
+dnf update -y
+dnf install -y docker
+systemctl enable --now docker
+
+# Docker Compose v2 plugin
+mkdir -p /usr/local/lib/docker/cli-plugins
+curl -fsSL "https://github.com/docker/compose/releases/latest/download/docker-compose-linux-$(uname -m)" \
+  -o /usr/local/lib/docker/cli-plugins/docker-compose
+chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+
+install -d /opt/livekit /opt/livekit/caddy_data
+
+# ── rendered config ──
+cat > /opt/livekit/livekit.yaml <<'LIVEKIT_YAML'
+${livekit_yaml}
+LIVEKIT_YAML
+
+cat > /opt/livekit/Caddyfile <<'CADDYFILE'
+${caddyfile}
+CADDYFILE
+
+cat > /opt/livekit/docker-compose.yaml <<'COMPOSE'
+services:
+  caddy:
+    image: caddy:2
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - /opt/livekit/Caddyfile:/etc/caddy/Caddyfile
+      - /opt/livekit/caddy_data:/data
+  livekit:
+    image: livekit/livekit-server:latest
+    command: --config /etc/livekit.yaml
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - /opt/livekit/livekit.yaml:/etc/livekit.yaml
+COMPOSE
+
+cd /opt/livekit
+docker compose up -d

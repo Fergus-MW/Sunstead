@@ -1,0 +1,27 @@
+# LiveKit server config (single-node). Caddy terminates TLS for the WS endpoint
+# and reverse-proxies it to port 7880. WebRTC media flows directly to the
+# instance's public IP over the UDP range, with TCP/7881 and TURN/UDP as
+# fallbacks for networks that block UDP egress.
+#
+# NOTE: TURN/TLS (443) is the only thing that punches through firewalls blocking
+# both UDP and non-443 TCP. It needs LiveKit to read Caddy's cert files and is
+# omitted here to keep the bootstrap robust — add it later if you hit a
+# locked-down network (see deploy/README.md "Hardening").
+port: 7880
+bind_addresses:
+  - ""
+log_level: info
+
+rtc:
+  tcp_port: 7881
+  port_range_start: 50000
+  port_range_end: 60000
+  use_external_ip: true
+
+turn:
+  enabled: true
+  domain: ${turn_domain}
+  udp_port: 3478
+
+keys:
+  ${api_key}: ${api_secret}
