@@ -206,7 +206,7 @@ export default function Home() {
           </p>
           <p className="mx-auto max-w-md text-sm text-[#f3ead3]/60">
             Agents live in Slack, GitHub, even WhatsApp. We put them in the
-            room where the work actually gets decided — so it can execute.
+            room where the work actually gets decided, so it can execute.
           </p>
         </div>
 
