@@ -4,15 +4,24 @@ Two jobs, one small FastAPI app:
   • POST /tasks   — produce an `agent.tasks.*` message. Used by the avatar's `delegate()` tool (seam option a)
                     AND the FE "ask box". HTTP at the edge → Kafka in the core.
   • WS /stream    — tail `agent.results` + `agent.activity` and push them to the browser (the deliverable + the
-                    visible status feed). Each connection gets its own consumer group.
+                    visible status feed).
+
+**One shared broadcast consumer, not one-per-connection.** A single long-lived consumer (started at boot) tails
+results+activity into a bounded ring buffer and fans out to every connected socket. This fixes three problems the
+per-connection design had: (1) a fast task could complete in the gap before a brand-new consumer group finished
+joining → the result was produced past `latest` and never seen ("I clicked ask and nothing appeared"); the ring
+buffer is replayed on connect so a late-joining browser still sees recent results. (2) consumer-group sprawl from
+the FE's auto-reconnect loop. (3) one malformed frame tearing down the socket — each message is now isolated.
 
 Run it (alongside the agent-runner, same image):  uv run python -m agent_runner.gateway
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
+from collections import deque
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -26,6 +35,9 @@ from shared.kafka import consume, make_producer, publish
 
 log = logging.getLogger("gateway")
 
+RING_SIZE = 200          # recent envelopes replayed to a newly-connected socket
+CLIENT_QUEUE_MAX = 500   # per-socket backlog before we drop (a stalled browser can't back up Kafka)
+
 
 class TaskRequest(BaseModel):
     intent: TaskIntent
@@ -34,14 +46,104 @@ class TaskRequest(BaseModel):
     requested_by: str = "gateway"
 
 
+# A fanned-out stream item: (meeting_id, envelope_id, raw_json_text). The id lets a socket dedupe the small
+# overlap between its replay snapshot and the live feed; the meeting_id drives the per-socket filter.
+Item = tuple[str, str, str]
+
+
+class Hub:
+    """Fan-out of the results+activity stream to all connected WS clients, with a replay buffer.
+
+    One background task owns the only Kafka consumer; each socket gets an asyncio.Queue fed from it.
+    """
+
+    def __init__(self, settings: config.Settings):
+        self.settings = settings
+        self.ring: deque[Item] = deque(maxlen=RING_SIZE)
+        self.clients: set[asyncio.Queue[Item]] = set()
+        self._task: asyncio.Task | None = None
+
+    def start(self) -> None:
+        self._task = asyncio.create_task(self._run(), name="gateway-broadcast")
+
+    async def stop(self) -> None:
+        if self._task:
+            self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
+
+    def register(self) -> asyncio.Queue[Item]:
+        q: asyncio.Queue[Item] = asyncio.Queue(maxsize=CLIENT_QUEUE_MAX)
+        self.clients.add(q)
+        return q
+
+    def unregister(self, q: asyncio.Queue) -> None:
+        self.clients.discard(q)
+
+    def _fanout(self, item: Item) -> None:
+        self.ring.append(item)
+        for q in self.clients:
+            try:
+                q.put_nowait(item)
+            except asyncio.QueueFull:
+                pass  # a stalled browser drops messages rather than stalling the consumer
+
+    async def stream_for(self, meeting_id: str | None):
+        """Yield raw envelope JSON for one subscriber: replay the recent ring, then stream live.
+
+        Registering the queue *before* snapshotting the ring closes the gap (no message is missed between
+        snapshot and live); the envelope-id dedupe drops the small replay/live overlap exactly once.
+        """
+        q = self.register()
+        try:
+            replayed: set[str] = set()
+            for mid, eid, text in list(self.ring):
+                if meeting_id is None or mid == meeting_id:
+                    replayed.add(eid)
+                    yield text
+            while True:
+                mid, eid, text = await q.get()
+                if eid in replayed:                  # snapshot/live overlap — drop the dup once
+                    replayed.discard(eid)
+                    continue
+                if meeting_id is None or mid == meeting_id:
+                    yield text
+        finally:
+            self.unregister(q)
+
+    async def _run(self) -> None:
+        # Unique group per process so every gateway instance sees the full live stream (broadcast, not work-sharing).
+        group = f"gateway-broadcast-{uuid.uuid4().hex[:8]}"
+        while True:  # stay up across a flaky/late Kafka — the FE degrades gracefully meanwhile
+            try:
+                async for msg in consume(config.RESULTS, config.ACTIVITY,
+                                         group_id=group, settings=self.settings,
+                                         auto_offset_reset="latest"):
+                    try:
+                        env = Envelope.model_validate_json(msg.value)   # validate, but never let one bad frame...
+                        self._fanout((env.meeting_id, env.id, msg.value.decode()))
+                    except Exception as e:  # ...kill the feed for everyone else
+                        log.warning("skipping unparseable %s message: %s", msg.topic, e)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                log.warning("broadcast consumer error (%s) — retrying", e)
+                await asyncio.sleep(2)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.settings = config.load()
     app.state.producer = await make_producer(app.state.settings)  # one warm producer, reused
+    app.state.hub = Hub(app.state.settings)
+    app.state.hub.start()
     log.info("gateway up (bootstrap=%s)", app.state.settings.kafka.bootstrap)
     try:
         yield
     finally:
+        await app.state.hub.stop()
         await app.state.producer.stop()
 
 
@@ -71,21 +173,20 @@ async def create_task(req: TaskRequest) -> dict:
 
 @app.websocket("/stream")
 async def stream(ws: WebSocket, meeting_id: str | None = None) -> None:
-    """Tail results + activity to the browser; optionally filter to one meeting."""
+    """Tail results + activity to the browser; optionally filter to one meeting.
+
+    On connect we replay the recent ring buffer (so a browser that opens *after* asking still sees the result),
+    then stream live from a per-socket queue fed by the shared broadcast consumer.
+    """
     await ws.accept()
-    group = f"gateway-ws-{uuid.uuid4().hex[:8]}"
+    hub: Hub = ws.app.state.hub
     try:
-        async for msg in consume(config.RESULTS, config.ACTIVITY,
-                                 group_id=group, settings=ws.app.state.settings,
-                                 auto_offset_reset="latest"):
-            env = Envelope.model_validate_json(msg.value)
-            if meeting_id and env.meeting_id != meeting_id:
-                continue
-            await ws.send_text(msg.value.decode())
+        async for text in hub.stream_for(meeting_id):
+            await ws.send_text(text)
     except WebSocketDisconnect:
-        log.info("ws %s disconnected", group)
-    except Exception as e:  # noqa: keep the socket failure off the consumer loop
-        log.warning("ws %s error: %s", group, e)
+        pass
+    except Exception as e:  # noqa: keep a socket failure off the shared consumer
+        log.warning("ws error: %s", e)
 
 
 def main() -> None:
