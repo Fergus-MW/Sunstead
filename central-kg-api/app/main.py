@@ -12,7 +12,7 @@ from sqlalchemy import text
 
 from .config import get_settings
 from .db import engine
-from .routers import entity, extract, ingest, link, query, subgraph, timeline, update
+from .routers import entity, extract, ingest, link, query, search, subgraph, timeline, update
 
 load_dotenv()
 logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"))
@@ -50,6 +50,7 @@ app.include_router(ingest.router, tags=["ingest"])
 app.include_router(extract.router, tags=["extract"])
 app.include_router(link.router, tags=["graph"])
 app.include_router(query.router, tags=["query"])
+app.include_router(search.router, tags=["query"])
 app.include_router(entity.router, tags=["query"])
 app.include_router(subgraph.router, tags=["query"])
 app.include_router(update.router, tags=["events"])

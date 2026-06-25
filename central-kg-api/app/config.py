@@ -15,6 +15,11 @@ class Settings(BaseSettings):
     anthropic_api_key: str | None = None
     anthropic_model: str = "claude-sonnet-4-6"
 
+    # OpenSearch BM25 full-text recall (the `/search` endpoint). Optional — when unset, `/search` falls back to
+    # the trigram path so nothing breaks. Same index the seed mirror writes (`seed/mirror_opensearch.py`).
+    opensearch_url: str | None = None
+    opensearch_index: str = "kg-nodes"
+
     # Embedding column kept in the schema for forward compatibility (Voyage,
     # sentence-transformers, etc.) but no provider is wired up today —
     # Anthropic does not ship an embeddings API.
