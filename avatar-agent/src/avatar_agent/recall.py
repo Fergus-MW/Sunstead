@@ -36,6 +36,10 @@ class RecallClient:
         payload = {
             "meeting_url": meeting_url,
             "bot_name": self.settings.bot_name,
+            # Run the bot on a larger VM — the default `web` (0.25 core) can't keep
+            # up with the avatar pipeline and drops frames. `variant` is keyed by
+            # platform; Google Meet is the only one we dispatch to.
+            "variant": {"google_meet": self.settings.recall_bot_variant},
             "output_media": {
                 "camera": {
                     "kind": "webpage",
