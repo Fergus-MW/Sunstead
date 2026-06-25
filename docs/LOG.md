@@ -26,6 +26,38 @@ agent-runner/gateway to it (bootstrap + SASL/mTLS creds — fetchable via MCP `a
 
 ---
 
+## 2026-06-25 — Ran the whole local stack end-to-end; made the web-agent real
+
+**What:** brought the full local system up and verified every seam with real round-trips, then implemented the
+web-agent. Proven live: Kafka smoke; runner echo loop; gateway `POST /tasks` → Kafka → runner → `WS /stream`; the FE
+dashboard's `/api/tasks` proxy → gateway; **git-agent** answering off the live ~6k-node graph via `aiven_pg_read`
+(top authors 387/32/23 commits) once the operator enabled the org's *Allow MCP connection* toggle; **central-kg-api**
+against the seeded Aiven PG so `/graph` renders real `code_module` nodes; and a **new web-agent** that asks Claude for
+a one-file HTML site, writes it to `SITES_DIR/<task_id>/`, and returns a `url` artifact — fetched back at 200, 16 KB,
+shown on the dashboard task board. Added `scripts/serve_sites.py` (+ `make sites`/`make web`, `SITES_*` env).
+
+**Why:** the operator flagged that *nothing had been run locally or deployed*. The gap analysis said the binding
+risk was integration, not capability — so the highest-value move was to actually run it and close the cheapest
+remaining seam (the web-agent deliverable, the 33%-creativity "wow"). Chose a **self-contained static server over a
+Vercel deploy** so the demo needs no extra token and runs fully offline; the write+url step is a clean swap-point for
+a real Vercel deploy later.
+
+**Analysis / consequences:** the worker half of the delegation flow is now *proven*, not aspirational — the only
+piece left for the headline "delegate mid-call" is the avatar's `delegate()` → gateway `POST /tasks` call. Two
+operational facts worth keeping: (1) the runner must have `ANTHROPIC_API_KEY`+`AIVEN_TOKEN` in its **process env**
+(sourced from the repo-root `.env`; an empty `agent-system/.env` value shadows it — already addressed in the loader),
+and (2) `central-kg-api` reaches PG over a **direct asyncpg** connection (`postgresql+asyncpg://…?ssl=require`), which
+is *not* gated by the Aiven MCP toggle — so `/graph` works independently of the 34% MCP path. A credential-fetch
+helper that scraped the PG password via MCP was correctly blocked by the safety classifier; the operator supplied the
+URL instead. The Aiven MCP org toggle remains the single switch gating both the 34% (KG reads) and 33% (provisioning).
+
+**Touches:** `agent-system/agent-runner/.../agents/web.py`, `agent-system/scripts/serve_sites.py`,
+`agent-system/{Makefile, .env.example, .gitignore}`, `docs/OVERVIEW.md`. (Local-run only; no infra committed.)
+
+— Claude (Opus 4.8), signed off
+
+---
+
 ## 2026-06-25 — Thin vertical slice runs end-to-end; only blocker is an Aiven org toggle
 
 **What:** built `scripts/ask.py` (question → git-agent → Aiven MCP → live KG → answer; **no Kafka, no Docker**) and

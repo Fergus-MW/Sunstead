@@ -22,13 +22,14 @@ flow is **not wired yet**, and that — not missing capability — is the whole 
 | Pillar | State | Reality |
 |---|---|---|
 | **Knowledge graph** (`central-kg-api/`) | ✅ **strongest** | Live Aiven Postgres+pgvector, **seeded ~6,183 nodes / 26,179 edges** from `anthropic-sdk-python`; hybrid OpenSearch→PG retrieval ~125 ms. Demo-bankable data exists *today*. |
-| **Agent suite** (`agent-system/`) | ✅ **MCP-native showpiece** | One container: warm `mcp-aiven` session, Kafka consumer, harness; **git-agent works** (answers from the graph via `aiven_pg_read`). web/data agents are stubs. |
+| **Agent suite** (`agent-system/`) | ✅ **MCP-native showpiece** | One container: warm `mcp-aiven` session, Kafka consumer, harness. **git-agent + web-agent both work** — git answers from the live graph via `aiven_pg_read` (verified: top authors 387/32/23 commits); web-agent generates a site with Claude and publishes it to a served URL. echo runs no-creds; data-agent still a stub. **Full local loop proven end-to-end** (FE ask box → gateway → Kafka → runner → result → WS). |
 | **Avatar / listener** (`ferg/avatar-agent`, unmerged) | ✅ **the wow** | LiveKit + Recall + Anam talking-face; realtime STT→LLM→TTS; full Terraform. **But it reaches data over HTTP to `central-kg-api`, emits no Kafka, and doesn't delegate to the agent suite.** |
-| **Frontend** (`meet-joiner/`) | 🟡 **growing** | Next.js bot-launcher (`POST /api/join`) **+ a knowledge-graph explorer** (`/graph`, zero-dep canvas force graph over `central-kg-api`) **+ an agent dashboard** (`/dashboard`: live feed + task board + ask box over the gateway's `WS /stream` / `POST /tasks`). Still missing the in-call transcript overlay; the dashboard's e2e path (gateway↔Kafka↔runner) is **not yet run** — it degrades gracefully until then. |
+| **Frontend** (`meet-joiner/`) | 🟡 **growing** | Next.js bot-launcher (`POST /api/join`) **+ a knowledge-graph explorer** (`/graph`, zero-dep canvas force graph over `central-kg-api`) **+ an agent dashboard** (`/dashboard`: live feed + task board + ask box over the gateway's `WS /stream` / `POST /tasks`). Still missing the in-call transcript overlay. The dashboard's e2e path (gateway↔Kafka↔runner) and `/graph` over the live KG are **both verified running locally**; degrades gracefully when a backend is down. |
 
-**The gap:** the avatar (the real listener) produces no `agent.tasks.*`; the agent suite consumes a topic only a
-dev script writes to. The two best-built parts don't talk to each other. **Aiven Kafka is also not provisioned**
-(no free tier) — the dispatch spine exists only as local redpanda.
+**The gap (narrowed):** the FE → gateway → Kafka → runner → FE loop is now **wired and proven locally** — the
+dashboard ask box dispatches real tasks and git/web agents return results live. The remaining seam is the
+**avatar**, which still produces no `agent.tasks.*`, so *mid-call* delegation isn't live yet. Dispatch is proven on
+local redpanda; the Aiven Kafka path is the deploy step.
 
 ## 3. Repo map — where the code actually is
 
@@ -47,18 +48,20 @@ dev script writes to. The two best-built parts don't talk to each other. **Aiven
 
 ## 4. Where we stand vs the rubric (34 / 33 / 33)
 
-- **34% MCP depth** — **git-agent is the proof** (`aiven_pg_read` through `mcp-aiven`, on real data). Strong. *But*
-  the avatar bypasses MCP (HTTP to the KG) — a contradiction DESIGN resolves with a two-layer framing.
-- **33% autonomy** — the **un-provisioned Kafka is the opportunity**: provision it via MCP *on camera* = the exact
-  evidence judges want. Not done yet.
-- **33% creativity/impact** — the **avatar is a differentiator** most teams won't have; the **web-agent deliverable**
-  (deploy a real URL mid-call) is the visual wow and is currently a stub.
+- **34% MCP depth** — **git-agent verified end-to-end on real data** (`aiven_pg_read` through `mcp-aiven`) after the
+  org's *Allow MCP connection* toggle was enabled. Strong. *But* the avatar bypasses MCP (HTTP to the KG) — a
+  contradiction DESIGN resolves with a two-layer framing.
+- **33% autonomy** — provision Aiven Kafka via MCP *on camera* = the exact evidence judges want (topic-create via MCP
+  already in history; full cluster path is the deploy step).
+- **33% creativity/impact** — the **web-agent is now real**: Claude generates a site and publishes it to a live URL,
+  shown as a clickable artifact on the dashboard task board. The **avatar** adds a differentiator most teams lack.
 
 ## 5. Run it (local-first)
 
-- **Agent suite:** `cd agent-system && uv sync && cp .env.example .env && docker compose up -d && uv run python infra/kafka_admin.py`,
-  then `uv run python -m agent_runner` + `uv run python scripts/publish_task.py --intent echo --args '{"text":"hi"}'`.
-  The echo path needs no creds; git-agent needs `AIVEN_TOKEN` + `ANTHROPIC_API_KEY`. (Details: `agent-system/README.md`.)
+- **Agent suite:** `cd agent-system && uv sync && cp .env.example .env && make up && make topics`, then in separate
+  terminals: `make run` (runner), `make gateway` (:8800, FE bus), `make sites` (:8810, web-agent output). Smoke:
+  `make echo`; real site: `make web`. echo needs no creds; git/web agents need `AIVEN_TOKEN` + `ANTHROPIC_API_KEY` in
+  the runner's env (the loader merges the repo-root `.env`). (Details: `agent-system/README.md`.)
 - **KG:** `cd central-kg-api` — FastAPI over the live Aiven PG; seed via `seed/`. (Details: `central-kg-api/README.md`.)
 - **Avatar:** on `ferg/avatar-agent` — `avatar-agent start` + `dispatch-bot <meet-url>`. (Details: `avatar-agent/README.md`.)
 - **FE:** `cd meet-joiner && npm install && cp .env.example .env && npm run dev` → `/graph` (needs `central-kg-api`
@@ -71,8 +74,9 @@ The fastest path to a winning state is **not more building — it's a merge and 
 [DESIGN.md](DESIGN.md) §Roadmap):
 1. Merge the unmerged branches (avatar, demo-data) onto `main`.
 2. **Provision Aiven Kafka via MCP, on camera** (kills the infra gap + banks autonomy).
-3. **Wire one delegation** avatar → `agent.tasks.*` → worker → deliverable on the FE.
-4. **Make web-agent real** (tiny static site → Vercel) for the visual payoff.
+3. **Wire one delegation** avatar → gateway `POST /tasks` → `agent.tasks.*` → worker → deliverable on the FE. *(The
+   worker side is proven; only the avatar's `delegate()` call is missing.)*
+4. ~~Make web-agent real~~ ✅ **done** — Claude-generated site → served URL artifact on the dashboard.
 5. Reconcile the docs to reality (this doc system is step zero of that).
 
 The thing to guard against: polishing pillars in isolation instead of closing seams. The marginal *wire* is worth
