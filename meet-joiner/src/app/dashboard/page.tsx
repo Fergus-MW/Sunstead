@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AppHeader from "../_components/AppHeader";
 import Markdown from "../_components/Markdown";
 import { fmtTime, relativeTime } from "../_components/format";
@@ -15,6 +15,11 @@ type ActivityStep = { status: string; detail?: string; ts: string };
 type TaskRow = {
   taskId: string;
   intentHint?: string;
+  args?: Record<string, unknown>;
+  requestedBy?: string;
+  parentTaskId?: string;
+  effort?: string;
+  createdTs?: string;
   latestStatus: string;
   detail?: string;
   terminal?: "completed" | "failed";
@@ -24,7 +29,8 @@ type TaskRow = {
   verdict?: Verdict | null;
   lastTs: string;
   activityCount: number;
-  steps: ActivityStep[]; // oldest → newest, for the per-card timeline
+  steps: ActivityStep[]; // oldest -> newest, for the per-card timeline
+  events: Envelope[];
 };
 
 // Append a step, collapsing a repeat of the previous status+detail into a ts bump so a
@@ -82,13 +88,22 @@ function deriveTasks(events: Envelope[]): TaskRow[] {
         lastTs: env.ts,
         activityCount: 0,
         steps: [],
+        events: [],
       } as TaskRow);
+    row.events.push(env);
 
     if (env.type === "task.create") {
       // The dispatch moment (now broadcast by the gateway). It's the earliest event, so a
       // just-dispatched task appears immediately with its intent + a "dispatched" pill —
       // a later "received"/activity overwrites the status as the runner picks it up.
       if (typeof p.intent === "string") row.intentHint = p.intent;
+      if (p.args && typeof p.args === "object" && !Array.isArray(p.args)) {
+        row.args = p.args as Record<string, unknown>;
+      }
+      if (typeof p.requested_by === "string") row.requestedBy = p.requested_by;
+      if (typeof p.parent_task_id === "string") row.parentTaskId = p.parent_task_id;
+      if (typeof p.effort === "string") row.effort = p.effort;
+      row.createdTs = row.createdTs ?? env.ts;
       row.latestStatus = "dispatched";
       pushStep(row.steps, { status: "dispatched", ts: env.ts });
     } else if (env.type === "activity") {
@@ -514,177 +529,440 @@ function FeedChainView({ chain, now }: { chain: FeedChain; now: number }) {
   );
 }
 
-// One agent card. Memoized so a streamed trace delta only re-renders the card whose
-// `trace` prop actually changed — without this, every token re-rendered all cards.
-// `now` ticks every 2s (relative-time refresh); that's a cheap, infrequent re-render.
 function compactText(value: string): string {
   return value.replace(/\s+/g, " ").trim();
 }
 
-function CompactSummary({ row }: { row: TaskRow }) {
-  const artifact = row.artifacts[0];
-  const answer = typeof row.result?.answer === "string" ? compactText(row.result.answer) : "";
-  if (!artifact && !answer && !row.error) return null;
+const TASK_TOPIC_BY_INTENT: Record<string, string> = {
+  echo: "agent.tasks.dev",
+  build_website: "agent.tasks.web",
+  update_website: "agent.tasks.web",
+  analyze: "agent.tasks.data",
+  summarize_metrics: "agent.tasks.data",
+  query_data: "agent.tasks.data",
+  read_git: "agent.tasks.git",
+  blame: "agent.tasks.git",
+  who_changed: "agent.tasks.git",
+  recent_changes: "agent.tasks.git",
+  ask: "agent.tasks.git",
+  recap: "agent.tasks.ops",
+  action_items: "agent.tasks.ops",
+  decisions: "agent.tasks.ops",
+  research: "agent.tasks.research",
+};
 
-  return (
-    <div className="mt-2 space-y-1.5 rounded border border-[#f3ead3]/10 bg-black/20 p-2">
-      {artifact &&
-        (artifact.kind === "url" || artifact.kind === "image" ? (
-          <a
-            href={artifact.value}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex max-w-full items-center gap-1 truncate rounded-full border border-sky-300/30 bg-sky-900/20 px-2 py-0.5 text-[11px] text-sky-200 hover:border-sky-300/60 hover:text-sky-100"
-          >
-            {artifact.kind === "image" ? "image artifact" : "url artifact"}:{" "}
-            {artifact.value.replace(/^https?:\/\//, "")}
-          </a>
-        ) : (
-          <span className="inline-flex max-w-full truncate rounded-full border border-[#f3ead3]/15 px-2 py-0.5 text-[11px] text-[#f3ead3]/65">
-            {artifact.kind}: {artifact.value}
-          </span>
-        ))}
-      {answer && (
-        <p className="max-h-10 overflow-hidden text-[11px] leading-snug text-[#f3ead3]/55">
-          {answer}
-        </p>
-      )}
-      {row.error && <p className="text-[11px] leading-snug text-rose-200/80">{row.error}</p>}
-    </div>
-  );
+type DetailTab = "overview" | "timeline" | "reasoning" | "evidence" | "raw";
+
+function argString(args: Record<string, unknown> | undefined, ...keys: string[]): string {
+  if (!args) return "";
+  for (const key of keys) {
+    const value = args[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return "";
 }
 
-const TaskCard = memo(function TaskCard({
+function taskPrompt(row: TaskRow): string {
+  return argString(row.args, "question", "brief", "text", "q") || row.detail || "";
+}
+
+function resultString(row: TaskRow, ...keys: string[]): string {
+  if (!row.result) return "";
+  for (const key of keys) {
+    const value = row.result[key];
+    if (typeof value === "string" && value.trim()) return compactText(value);
+  }
+  return "";
+}
+
+function outputPreview(row: TaskRow): string {
+  return resultString(row, "answer", "summary", "insight", "url") || row.error || "";
+}
+
+function topicForEnvelope(env: Envelope, row?: TaskRow): string {
+  if (env.type === "task.create") {
+    const intent = typeof env.payload.intent === "string" ? env.payload.intent : row?.intentHint;
+    return intent ? (TASK_TOPIC_BY_INTENT[intent] ?? "agent.tasks.*") : "agent.tasks.*";
+  }
+  if (env.type === "activity") return "agent.activity";
+  if (env.type === "trace") return "agent.trace";
+  if (env.type === "control") return "agent.control";
+  if (env.type === "transcript.final" || env.type === "transcript.partial") return "meeting.transcript";
+  if (env.type === "kg.update") return "kg.updates";
+  if (env.type === "verdict" || env.type === "task.completed" || env.type === "task.failed") return "agent.results";
+  return "unknown";
+}
+
+function eventSummary(env: Envelope): string {
+  const p = env.payload;
+  const parts = [
+    typeof p.intent === "string" ? p.intent : undefined,
+    typeof p.status === "string" ? p.status : undefined,
+    typeof p.detail === "string" ? p.detail : undefined,
+    typeof p.error === "string" ? p.error : undefined,
+    typeof p.text === "string" ? p.text : undefined,
+  ].filter(Boolean);
+  return parts.join(" - ");
+}
+
+function TaskListItem({
   row,
   trace,
   now,
-  isStopping,
-  expanded,
-  onToggle,
-  onStop,
+  selected,
+  onSelect,
 }: {
   row: TaskRow;
   trace?: TaskTrace;
   now: number;
-  isStopping: boolean;
-  expanded: boolean;
-  onToggle: (taskId: string) => void;
-  onStop: (taskId: string) => void;
+  selected: boolean;
+  onSelect: () => void;
 }) {
+  const prompt = taskPrompt(row);
+  const preview = outputPreview(row);
   const stalled = !row.terminal && liveAgeMs(row.lastTs, trace?.ts ?? 0, now) > STUCK_MS;
-
   return (
-    <div
-      className={`rounded-lg border border-[#f3ead3]/12 bg-black/25 p-3 transition-colors hover:border-[#f3ead3]/25 ${
-        expanded ? "md:col-span-full" : ""
+    <button
+      type="button"
+      onClick={onSelect}
+      className={`w-full rounded-md border bg-black/20 p-3 text-left transition-colors ${
+        selected ? "border-[#f3ead3]/35 bg-[#f3ead3]/8" : "border-[#f3ead3]/10 hover:border-[#f3ead3]/25"
       }`}
       style={{ borderLeft: `3px solid ${accentFor(row)}` }}
     >
-      <button
-        type="button"
-        onClick={() => onToggle(row.taskId)}
-        aria-expanded={expanded}
-        className="flex w-full items-center gap-2 rounded text-left focus:outline-none focus:ring-1 focus:ring-[#f3ead3]/25"
-      >
-        <span className="w-3 shrink-0 text-[10px] text-[#f3ead3]/45" aria-hidden>
-          {expanded ? "v" : ">"}
-        </span>
+      <div className="flex min-w-0 items-center gap-2">
         {row.intentHint && (
           <span className="shrink-0 rounded bg-[#f3ead3]/8 px-1.5 py-0.5 text-[10px] text-[#f3ead3]/65">
             {row.intentHint}
           </span>
         )}
-        <span className="truncate font-mono text-[10px] text-[#f3ead3]/35">{row.taskId}</span>
-        <span className="ml-auto flex shrink-0 items-center gap-1.5">
-          <VerdictBadge v={row.verdict} />
-          <StatusPill row={row} />
-        </span>
-      </button>
-
-      {row.detail && <p className="mt-1.5 text-xs text-[#f3ead3]/60">{row.detail}</p>}
-
-      {!expanded && <CompactSummary row={row} />}
-
-      {expanded && (
-        <>
-          <StepsTimeline steps={row.steps} terminal={!!row.terminal} />
-
-      <TraceView trace={trace} terminal={!!row.terminal} />
-
-      {row.error && (
-        <p className="mt-2 rounded border border-rose-300/20 bg-rose-900/20 p-1.5 text-xs text-rose-200/90">
-          {row.error}
-        </p>
-      )}
-      {row.result && Object.keys(row.result).length > 0 && <ResultView result={row.result} />}
-
-      {row.artifacts.length > 0 && (
-        <div className="mt-2 flex flex-wrap gap-1.5">
-          {row.artifacts.map((a) =>
-            a.kind === "image" ? (
-              <a key={`${a.kind}:${a.value}`} href={a.value} target="_blank" rel="noreferrer" className="block w-full">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={a.value}
-                  alt="chart"
-                  className="mt-1 max-h-80 w-full rounded-lg border border-[#f3ead3]/15 bg-[#0b1a17] object-contain"
-                />
-              </a>
-            ) : a.kind === "url" ? (
-              <a
-                key={`${a.kind}:${a.value}`}
-                href={a.value}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex max-w-full items-center gap-1 truncate rounded-full border border-sky-300/30 bg-sky-900/20 px-2 py-0.5 text-xs text-sky-200 hover:border-sky-300/60 hover:text-sky-100"
-              >
-                open {a.value.replace(/^https?:\/\//, "")}
-              </a>
-            ) : (
-              <span
-                key={`${a.kind}:${a.value}`}
-                className="truncate rounded-full border border-[#f3ead3]/15 px-2 py-0.5 text-xs text-[#f3ead3]/70"
-              >
-                {a.kind}: {a.value}
-              </span>
-            ),
-          )}
-        </div>
-      )}
-        </>
-      )}
-
+        <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-[#f3ead3]/35">{row.taskId}</span>
+        <StatusPill row={row} />
+      </div>
+      {prompt && <p className="mt-2 line-clamp-2 text-xs leading-snug text-[#f3ead3]/80">{prompt}</p>}
+      {preview && <p className="mt-1 line-clamp-2 text-[11px] leading-snug text-[#f3ead3]/45">{preview}</p>}
       <div className="mt-2 flex items-center gap-2 text-[10px] text-[#f3ead3]/30">
         <span title={fmtTime(row.lastTs)}>{relativeTime(row.lastTs, now)}</span>
-        <span>·</span>
-        <span>
-          {row.activityCount} update{row.activityCount === 1 ? "" : "s"}
+        <span>{row.activityCount} updates</span>
+        {row.artifacts.length > 0 && <span>{row.artifacts.length} artifacts</span>}
+        {stalled && <span className="rounded-full bg-rose-900/30 px-1.5 text-rose-300">stalled</span>}
+        <span className="ml-auto flex shrink-0 items-center gap-1">
+          <VerdictBadge v={row.verdict} />
         </span>
-        {!row.terminal && (
-          <span className="ml-auto flex items-center gap-1.5">
-            {stalled && <span className="rounded-full bg-rose-900/30 px-1.5 text-rose-300">stalled</span>}
+      </div>
+    </button>
+  );
+}
+
+function MessageFlow({ row, trace }: { row: TaskRow; trace?: TaskTrace }) {
+  const traceSeen = !!trace && (!!trace.text || !!trace.thinking);
+  return (
+    <div className="space-y-1.5">
+      {row.events.map((env) => {
+        const style = eventStyle(env.type);
+        return (
+          <div key={env.id} className="grid grid-cols-[8.5rem_7rem_minmax(0,1fr)] gap-2 rounded border border-[#f3ead3]/10 bg-black/20 px-2 py-1.5 text-[11px]">
+            <span className="truncate font-mono text-[#f3ead3]/35">{topicForEnvelope(env, row)}</span>
+            <span className="truncate uppercase tracking-wide" style={{ color: style.color }}>
+              {style.label}
+            </span>
+            <span className="min-w-0 truncate text-[#f3ead3]/60">{eventSummary(env) || fmtTime(env.ts)}</span>
+          </div>
+        );
+      })}
+      {traceSeen && (
+        <div className="grid grid-cols-[8.5rem_7rem_minmax(0,1fr)] gap-2 rounded border border-[#b69cff]/15 bg-[#b69cff]/[0.06] px-2 py-1.5 text-[11px]">
+          <span className="truncate font-mono text-[#f3ead3]/35">agent.trace</span>
+          <span className="truncate uppercase tracking-wide text-[#b69cff]">trace</span>
+          <span className="min-w-0 truncate text-[#f3ead3]/60">
+            {trace.lastSeq} deltas - {trace.thinking.length} thinking chars - {trace.text.length} output chars
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ArtifactLinks({ artifacts }: { artifacts: Artifact[] }) {
+  if (artifacts.length === 0) return null;
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {artifacts.map((a) =>
+        a.kind === "url" || a.kind === "image" ? (
+          <a
+            key={`${a.kind}:${a.value}`}
+            href={a.value}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex max-w-full items-center gap-1 truncate rounded-full border border-sky-300/30 bg-sky-900/20 px-2 py-0.5 text-xs text-sky-200 hover:border-sky-300/60 hover:text-sky-100"
+          >
+            {a.kind}: {a.value.replace(/^https?:\/\//, "")}
+          </a>
+        ) : (
+          <span
+            key={`${a.kind}:${a.value}`}
+            className="truncate rounded-full border border-[#f3ead3]/15 px-2 py-0.5 text-xs text-[#f3ead3]/70"
+          >
+            {a.kind}: {a.value}
+          </span>
+        ),
+      )}
+    </div>
+  );
+}
+
+function TaskDetail({
+  row,
+  trace,
+  now,
+  isStopping,
+  onStop,
+}: {
+  row: TaskRow | null;
+  trace?: TaskTrace;
+  now: number;
+  isStopping: boolean;
+  onStop: (taskId: string) => void;
+}) {
+  const [tab, setTab] = useState<DetailTab>("overview");
+  if (!row) {
+    return (
+      <section className="flex min-h-0 flex-1 items-center justify-center p-8 text-center text-sm text-[#f3ead3]/35">
+        Select a task to inspect its prompt, output, timeline, reasoning, evidence, and raw stream messages.
+      </section>
+    );
+  }
+  const prompt = taskPrompt(row);
+  const tabs: DetailTab[] = ["overview", "timeline", "reasoning", "evidence", "raw"];
+  return (
+    <section className="flex min-h-0 flex-1 flex-col">
+      <div className="border-b border-[#f3ead3]/10 p-4">
+        <div className="flex items-start gap-3">
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              {row.intentHint && (
+                <span className="rounded bg-[#f3ead3]/8 px-1.5 py-0.5 text-[10px] text-[#f3ead3]/65">
+                  {row.intentHint}
+                </span>
+              )}
+              <span className="font-mono text-[10px] text-[#f3ead3]/35">{row.taskId}</span>
+              <VerdictBadge v={row.verdict} />
+              <StatusPill row={row} />
+            </div>
+            <h2 className="mt-2 break-words text-sm font-medium leading-snug text-[#f3ead3]">
+              {prompt || row.detail || "No prompt captured"}
+            </h2>
+          </div>
+          {!row.terminal && (
             <button
               onClick={() => onStop(row.taskId)}
               disabled={isStopping}
-              aria-label={`Stop task ${row.taskId}`}
-              title="Cancel this task"
-              className="rounded-full border border-rose-300/30 px-2 py-0.5 text-rose-200/80 hover:border-rose-300/60 hover:text-rose-100 disabled:opacity-40"
+              className="rounded border border-rose-300/30 px-2 py-1 text-xs text-rose-200/80 hover:border-rose-300/60 hover:text-rose-100 disabled:opacity-40"
             >
               {isStopping ? "stopping..." : "stop"}
             </button>
-          </span>
+          )}
+        </div>
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          {tabs.map((t) => (
+            <button
+              key={t}
+              type="button"
+              onClick={() => setTab(t)}
+              className={`rounded border px-2 py-1 text-[10px] uppercase tracking-[0.18em] ${
+                tab === t
+                  ? "border-[#f3ead3]/45 bg-[#f3ead3]/10 text-[#f3ead3]"
+                  : "border-[#f3ead3]/15 text-[#f3ead3]/45 hover:border-[#f3ead3]/35 hover:text-[#f3ead3]/75"
+              }`}
+            >
+              {t}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto p-4">
+        {tab === "overview" && (
+          <div className="space-y-4">
+            <dl className="grid gap-2 text-xs sm:grid-cols-2 lg:grid-cols-4">
+              <Info label="requested by" value={row.requestedBy ?? "unknown"} />
+              <Info label="effort" value={row.effort ?? "standard"} />
+              <Info label="created" value={row.createdTs ? relativeTime(row.createdTs, now) : "unknown"} />
+              <Info label="last event" value={relativeTime(row.lastTs, now)} />
+            </dl>
+            {row.result && Object.keys(row.result).length > 0 && <ResultView result={row.result} />}
+            <ArtifactLinks artifacts={row.artifacts} />
+            {row.error && (
+              <p className="rounded border border-rose-300/20 bg-rose-900/20 p-2 text-xs text-rose-200/90">
+                {row.error}
+              </p>
+            )}
+          </div>
+        )}
+        {tab === "timeline" && (
+          <div className="space-y-4">
+            <MessageFlow row={row} trace={trace} />
+            <StepsTimeline steps={row.steps} terminal={!!row.terminal} />
+          </div>
+        )}
+        {tab === "reasoning" && (
+          trace ? (
+            <TraceView trace={trace} terminal={!!row.terminal} />
+          ) : (
+            <p className="py-12 text-center text-sm text-[#f3ead3]/35">No trace deltas captured for this task.</p>
+          )
+        )}
+        {tab === "evidence" && <EvidenceView row={row} />}
+        {tab === "raw" && (
+          <pre className="max-h-full overflow-auto rounded border border-[#f3ead3]/10 bg-black/30 p-3 text-[11px] leading-relaxed text-[#f3ead3]/65">
+            {JSON.stringify({ args: row.args, result: row.result, events: row.events }, null, 2)}
+          </pre>
         )}
       </div>
+    </section>
+  );
+}
+
+function Info({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded border border-[#f3ead3]/10 bg-black/20 p-2">
+      <dt className="text-[9px] uppercase tracking-[0.18em] text-[#f3ead3]/35">{label}</dt>
+      <dd className="mt-1 truncate text-[#f3ead3]/75">{value}</dd>
     </div>
   );
-});
+}
+
+function EvidenceView({ row }: { row: TaskRow }) {
+  const sources = Array.isArray(row.result?.sources) ? row.result.sources : [];
+  return (
+    <div className="space-y-3">
+      {row.verdict ? (
+        <div className="rounded border border-[#f3ead3]/10 bg-black/25 p-3 text-sm">
+          <VerdictBadge v={row.verdict} />
+          {row.verdict.note && <p className="mt-2 text-xs leading-relaxed text-[#f3ead3]/60">{row.verdict.note}</p>}
+        </div>
+      ) : (
+        <p className="rounded border border-[#f3ead3]/10 bg-black/20 p-3 text-sm text-[#f3ead3]/40">
+          No verifier result for this task.
+        </p>
+      )}
+      {sources.length > 0 && (
+        <div className="space-y-1.5">
+          <h3 className="text-[10px] uppercase tracking-[0.24em] text-[#f3ead3]/45">Sources</h3>
+          {sources.map((source, i) => {
+            const url = typeof source === "object" && source !== null && "url" in source ? String(source.url) : "";
+            const title = typeof source === "object" && source !== null && "title" in source ? String(source.title) : url;
+            if (!url) return null;
+            return (
+              <a
+                key={`${url}:${i}`}
+                href={url}
+                target="_blank"
+                rel="noreferrer"
+                className="block rounded border border-[#f3ead3]/10 bg-black/20 px-2 py-1.5 text-xs text-sky-200 hover:border-sky-300/40"
+              >
+                <span className="block truncate">{title}</span>
+                <span className="block truncate font-mono text-[10px] text-[#f3ead3]/35">{url}</span>
+              </a>
+            );
+          })}
+        </div>
+      )}
+      <ArtifactLinks artifacts={row.artifacts} />
+    </div>
+  );
+}
+
+type StreamStat = {
+  topic: string;
+  count: number;
+  latestTs: string;
+  detail: string;
+};
+
+function StreamOverview({
+  events,
+  tasks,
+  traces,
+  now,
+}: {
+  events: Envelope[];
+  tasks: TaskRow[];
+  traces: Record<string, TaskTrace>;
+  now: number;
+}) {
+  const rows = useMemo<StreamStat[]>(() => {
+    const taskById = new Map(tasks.map((task) => [task.taskId, task]));
+    const stats = new Map<string, StreamStat>();
+    const touch = (topic: string, ts: string, detail: string, count = 1) => {
+      const existing = stats.get(topic);
+      if (!existing) {
+        stats.set(topic, { topic, count, latestTs: ts, detail });
+        return;
+      }
+      existing.count += count;
+      if (new Date(ts).getTime() >= new Date(existing.latestTs).getTime()) {
+        existing.latestTs = ts;
+        existing.detail = detail;
+      }
+    };
+
+    for (const env of events) {
+      const taskId = typeof env.payload.task_id === "string" ? env.payload.task_id : undefined;
+      const row = taskId ? taskById.get(taskId) : undefined;
+      const style = eventStyle(env.type);
+      touch(topicForEnvelope(env, row), env.ts, eventSummary(env) || style.label);
+    }
+
+    for (const [taskId, trace] of Object.entries(traces)) {
+      if (!trace.ts) continue;
+      const row = taskById.get(taskId);
+      const label = row?.intentHint ? `${row.intentHint} trace` : `${taskId} trace`;
+      touch("agent.trace", new Date(trace.ts).toISOString(), label, trace.lastSeq);
+    }
+
+    return [...stats.values()].sort((a, b) => byTsDesc(a.latestTs, b.latestTs));
+  }, [events, tasks, traces]);
+
+  return (
+    <div className="border-b border-[#f3ead3]/10 p-4">
+      <div className="mb-2 flex items-center justify-between">
+        <h2 className="text-[10px] uppercase tracking-[0.3em] text-[#f3ead3]/50">
+          Streams <span className="text-[#f3ead3]/30">({rows.length})</span>
+        </h2>
+        <span className="text-[10px] text-[#f3ead3]/30">Kafka</span>
+      </div>
+      {rows.length === 0 ? (
+        <p className="rounded border border-[#f3ead3]/10 bg-black/20 px-2 py-3 text-center text-[11px] text-[#f3ead3]/35">
+          Waiting for stream traffic.
+        </p>
+      ) : (
+        <div className="space-y-1.5">
+          {rows.slice(0, 7).map((row) => (
+            <div key={row.topic} className="rounded border border-[#f3ead3]/10 bg-black/20 px-2 py-1.5">
+              <div className="flex items-center gap-2">
+                <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-[#f3ead3]/70">{row.topic}</span>
+                <span className="shrink-0 text-[10px] tabular-nums text-[#f3ead3]/35">{row.count}</span>
+              </div>
+              <div className="mt-0.5 flex items-center gap-2 text-[10px] text-[#f3ead3]/30">
+                <span className="min-w-0 flex-1 truncate">{row.detail}</span>
+                <span className="shrink-0" title={fmtTime(row.latestTs)}>
+                  {relativeTime(row.latestTs, now)}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function Dashboard() {
   const [meetingId, setMeetingId] = useState("");
   // A 2s tick so relative times and "stuck" status stay live even when no events arrive.
   const [now, setNow] = useState(() => Date.now());
   const [filter, setFilter] = useState<TaskFilter>("all");
-  const [expandedTaskIds, setExpandedTaskIds] = useState<Set<string>>(() => new Set());
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 2000);
     return () => clearInterval(id);
@@ -729,27 +1007,9 @@ export default function Dashboard() {
   const selectFilter = useCallback((next: TaskFilter) => {
     setFilter((current) => (current === next ? "all" : next));
   }, []);
-  const toggleTask = useCallback((taskId: string) => {
-    setExpandedTaskIds((current) => {
-      const next = new Set(current);
-      if (next.has(taskId)) next.delete(taskId);
-      else next.add(taskId);
-      return next;
-    });
-  }, []);
-  const expandVisibleTasks = useCallback(() => {
-    setExpandedTaskIds(new Set(filteredTasks.map((task) => task.taskId)));
-  }, [filteredTasks]);
-  const collapseVisibleTasks = useCallback(() => {
-    setExpandedTaskIds((current) => {
-      const next = new Set(current);
-      for (const task of filteredTasks) next.delete(task.taskId);
-      return next;
-    });
-  }, [filteredTasks]);
-  const expandedVisibleCount = useMemo(
-    () => filteredTasks.filter((task) => expandedTaskIds.has(task.taskId)).length,
-    [filteredTasks, expandedTaskIds],
+  const selectedTask = useMemo(
+    () => filteredTasks.find((task) => task.taskId === selectedTaskId) ?? filteredTasks[0] ?? null,
+    [filteredTasks, selectedTaskId],
   );
 
   // Operator stop (docs/DESIGN.md §7): POST to the control channel; the cancelled result
@@ -763,8 +1023,7 @@ export default function Dashboard() {
       return n;
     });
   }, []);
-  // Stable across renders so the memoized TaskCard isn't re-rendered by a new handler
-  // identity on every streamed token.
+  // Stable across renders so streamed trace deltas do not also churn the stop handler.
   const stop = useCallback(
     async (taskId: string) => {
       setStopping((s) => new Set(s).add(taskId));
@@ -836,9 +1095,9 @@ export default function Dashboard() {
         </div>
       )}
 
-      <div className="flex min-h-0 flex-1 flex-col xl:flex-row">
-        {/* Agent board — the centerpiece */}
-        <section className="flex min-w-0 flex-1 flex-col">
+      <div className="grid min-h-0 flex-1 grid-cols-1 xl:grid-cols-[minmax(320px,400px)_minmax(0,1fr)_24rem]">
+        {/* Stable task list */}
+        <section className="flex min-h-0 flex-col border-r border-[#f3ead3]/10">
           <div className="flex items-center justify-between gap-3 border-b border-[#f3ead3]/10 px-4 py-2">
             <h2 className="flex items-center gap-2 text-[10px] uppercase tracking-[0.3em] text-[#f3ead3]/50">
               Agents
@@ -846,28 +1105,17 @@ export default function Dashboard() {
                 ({filter === "all" ? tasks.length : `${filteredTasks.length}/${tasks.length}`})
               </span>
             </h2>
-            <div className="flex items-center gap-1.5">
-              {filteredTasks.length > 0 && (
-                <button
-                  type="button"
-                  onClick={expandedVisibleCount === filteredTasks.length ? collapseVisibleTasks : expandVisibleTasks}
-                  className="rounded border border-[#f3ead3]/15 px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-[#f3ead3]/55 hover:border-[#f3ead3]/40 hover:text-[#f3ead3]"
-                >
-                  {expandedVisibleCount === filteredTasks.length ? "collapse all" : "expand all"}
-                </button>
-              )}
-              {filter !== "all" && (
-                <button
-                  type="button"
-                  onClick={() => setFilter("all")}
-                  className="rounded border border-[#f3ead3]/15 px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-[#f3ead3]/55 hover:border-[#f3ead3]/40 hover:text-[#f3ead3]"
-                >
-                  {FILTER_LABEL[filter]} x
-                </button>
-              )}
-            </div>
+            {filter !== "all" && (
+              <button
+                type="button"
+                onClick={() => setFilter("all")}
+                className="rounded border border-[#f3ead3]/15 px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-[#f3ead3]/55 hover:border-[#f3ead3]/40 hover:text-[#f3ead3]"
+              >
+                {FILTER_LABEL[filter]} x
+              </button>
+            )}
           </div>
-          <div className="min-h-0 flex-1 overflow-y-auto p-3">
+          <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
             {tasks.length === 0 ? (
               <p className="px-1 py-16 text-center text-sm text-[#f3ead3]/35">
                 No agents running. Dispatch one from the right, or wait for the avatar to delegate from the meeting.
@@ -877,29 +1125,34 @@ export default function Dashboard() {
                 No {FILTER_LABEL[filter]} agents match this view.
               </p>
             ) : (
-              <div className="grid items-start gap-3 [grid-template-columns:repeat(auto-fill,minmax(340px,1fr))]">
-                {filteredTasks.map((row) => (
-                  <TaskCard
-                    key={row.taskId}
-                    row={row}
-                    trace={traces[row.taskId]}
-                    now={now}
-                    isStopping={stopping.has(row.taskId)}
-                    expanded={expandedTaskIds.has(row.taskId)}
-                    onToggle={toggleTask}
-                    onStop={stop}
-                  />
-                ))}
-              </div>
+              filteredTasks.map((row) => (
+                <TaskListItem
+                  key={row.taskId}
+                  row={row}
+                  trace={traces[row.taskId]}
+                  now={now}
+                  selected={selectedTask?.taskId === row.taskId}
+                  onSelect={() => setSelectedTaskId(row.taskId)}
+                />
+              ))
             )}
           </div>
         </section>
 
-        {/* Right rail: dispatch + raw feed */}
-        <aside className="flex min-h-72 w-full shrink-0 flex-col border-t border-[#f3ead3]/10 xl:min-h-0 xl:w-96 xl:border-l xl:border-t-0">
+        <TaskDetail
+          row={selectedTask}
+          trace={selectedTask ? traces[selectedTask.taskId] : undefined}
+          now={now}
+          isStopping={selectedTask ? stopping.has(selectedTask.taskId) : false}
+          onStop={stop}
+        />
+
+        {/* Right rail: dispatch + stream telemetry */}
+        <aside className="flex min-h-0 flex-col border-t border-[#f3ead3]/10 xl:border-l xl:border-t-0">
           <div className="border-b border-[#f3ead3]/10 p-4">
             <AskBox meetingId={meetingId || DEFAULT_MEETING_ID} />
           </div>
+          <StreamOverview events={events} tasks={tasks} traces={traces} now={now} />
           <div className="flex items-center justify-between border-b border-[#f3ead3]/10 px-4 py-2">
             <h2 className="text-[10px] uppercase tracking-[0.3em] text-[#f3ead3]/50">
               Live feed <span className="text-[#f3ead3]/30">({chains.length})</span>

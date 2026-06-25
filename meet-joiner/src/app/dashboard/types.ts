@@ -71,6 +71,7 @@ export const INTENTS = [
   "blame",
   "who_changed",
   "recent_changes",
+  "research",
   "ask",
 ] as const;
 
@@ -91,6 +92,7 @@ export const INTENT_TEMPLATES: Record<Intent, string> = {
   blame: '{ "question": "who last changed the session token schema?" }',
   who_changed: '{ "question": "who last touched the auth module?" }',
   recent_changes: '{ "question": "what changed in the last week?" }',
+  research: '{ "question": "look up Sunstead online and summarize what it is" }',
   ask: '{ "question": "what do we know about the auth module?" }',
 };
 
@@ -110,6 +112,7 @@ export const INTENT_META: Record<Intent, { blurb: string; promptKey: string | nu
   blame: { blurb: "Finds who last changed something.", promptKey: "question" },
   who_changed: { blurb: "Finds who last touched something.", promptKey: "question" },
   recent_changes: { blurb: "Summarizes recent changes from the graph.", promptKey: "question" },
+  research: { blurb: "Looks up current external information on the live web.", promptKey: "question" },
   ask: { blurb: "Answers a general question from the knowledge graph.", promptKey: "question" },
 };
 

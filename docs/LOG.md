@@ -5,6 +5,32 @@
 
 ---
 
+## 2026-06-25 - Refactored mission control around stable focus and stream visibility
+
+**What:** replaced the expanding-card dashboard with a three-pane operator layout: a stable task list, a selected-task
+detail pane, and a right rail for dispatch plus live stream telemetry. Compact task rows now surface the starting
+prompt, output preview, status, verdict, artifact count, and stalled state without resizing the list. The detail pane
+adds tabs for overview, timeline/message flow, streamed reasoning/output, verifier evidence, and raw payloads. The
+right rail now shows Kafka-oriented stream activity across `meeting.transcript`, `agent.tasks.*`, `agent.activity`,
+`agent.results`, `agent.trace`, and `kg.updates`.
+
+**Why:** the card grid was still visually jumpy and hid the information operators most need first: the original query,
+latest output, and where the background messages are flowing. A fixed list plus detail pane keeps spatial context
+stable while still allowing deep inspection of one invocation.
+
+**Analysis / consequences:** the dashboard ask box now defaults to a natural-language planner mode by proxying
+`POST /api/transcript` to the gateway, with the old direct intent/JSON path retained as an explicit mode. This addresses
+the earlier Sunstead failure mode: a request like "look up Sunstead and build a site" should enter the planner instead
+of being forced into one direct website-build task. Added the direct `research` intent as well. Verified with
+`npm.cmd run lint`, `npm.cmd run build`, and a local `/dashboard` 200 response.
+
+**Touches:** `meet-joiner/src/app/dashboard/{AskBox,page,types}.tsx`,
+`meet-joiner/src/app/api/transcript/route.ts`, `docs/LOG.md`.
+
+- Codex (GPT-5), signed off
+
+---
+
 ## 2026-06-25 - Repaired mission-control task focus UX after live review
 
 **What:** fixed the dashboard interaction regression from the first focus pass. Task cards now expand independently
