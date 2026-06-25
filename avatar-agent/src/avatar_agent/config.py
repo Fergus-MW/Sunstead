@@ -15,6 +15,7 @@ from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PipelineMode = Literal["cascade", "realtime"]
+SttProvider = Literal["soniox", "deepgram"]
 
 
 class Settings(BaseSettings):
@@ -46,8 +47,14 @@ class Settings(BaseSettings):
     pipeline_mode: PipelineMode = Field(default="cascade", alias="PIPELINE_MODE")
     anthropic_api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")
     llm_model: str = Field(default="claude-sonnet-4-6", alias="LLM_MODEL")
+    # STT leg: Soniox (streaming, our default — PLAN §STT) or Deepgram. Each plugin
+    # reads its own key from the env (SONIOX_API_KEY / DEEPGRAM_API_KEY).
+    stt_provider: SttProvider = Field(default="soniox", alias="STT_PROVIDER")
+    soniox_api_key: str = Field(default="", alias="SONIOX_API_KEY")
+    soniox_model: str = Field(default="stt-rt-v5", alias="SONIOX_MODEL")
+    soniox_language_hints: str = Field(default="en", alias="SONIOX_LANGUAGE_HINTS")  # comma-sep
     deepgram_api_key: str = Field(default="", alias="DEEPGRAM_API_KEY")
-    stt_model: str = Field(default="nova-3", alias="STT_MODEL")
+    stt_model: str = Field(default="nova-3", alias="STT_MODEL")  # deepgram
     cartesia_api_key: str = Field(default="", alias="CARTESIA_API_KEY")
     tts_voice: str = Field(default="", alias="TTS_VOICE")
     openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")

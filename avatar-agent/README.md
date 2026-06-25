@@ -82,9 +82,11 @@ cp .env.example .env
 ```
 
 Pick a **cognition pipeline** with `PIPELINE_MODE`:
-- `cascade` (default) — streaming STT (Deepgram) → **Anthropic** LLM → streaming
-  TTS (Cartesia). Gives per-leg latency metrics; Anthropic-native (matches
-  Sunstead). Needs `ANTHROPIC_API_KEY`, `DEEPGRAM_API_KEY`, `CARTESIA_API_KEY`.
+- `cascade` (default) — streaming STT → **Anthropic** LLM → streaming TTS
+  (Cartesia). Gives per-leg latency metrics; Anthropic-native (matches Sunstead).
+  STT engine is `STT_PROVIDER`: **`soniox`** (default, streaming — needs
+  `SONIOX_API_KEY`) or `deepgram` (needs `DEEPGRAM_API_KEY`). Also needs
+  `ANTHROPIC_API_KEY` + `CARTESIA_API_KEY`.
 - `realtime` — OpenAI Realtime, one speech-to-speech model. Lowest latency, one
   key (`OPENAI_API_KEY`), but no per-leg breakdown.
 

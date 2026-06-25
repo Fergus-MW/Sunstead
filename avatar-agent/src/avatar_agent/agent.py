@@ -83,18 +83,38 @@ def build_session(cfg: Settings, runtime: AgentRuntime) -> AgentSession[AgentRun
 
     # Cascade: streaming STT → Anthropic LLM (tool calling) → streaming TTS, with
     # VAD + a turn detector for natural turn-taking and barge-in (CV-3).
-    from livekit.plugins import anthropic, cartesia, deepgram
+    from livekit.plugins import anthropic, cartesia
     from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
     tts_kwargs = {"voice": cfg.tts_voice} if cfg.tts_voice else {}
     return AgentSession(
         userdata=runtime,
-        stt=deepgram.STT(model=cfg.stt_model),
+        stt=_build_stt(cfg),
         llm=anthropic.LLM(model=cfg.llm_model),
         tts=cartesia.TTS(**tts_kwargs),
         vad=_get_vad(),
         turn_detection=MultilingualModel(),
     )
+
+
+def _build_stt(cfg: Settings):
+    """The streaming STT leg. Soniox (default) or Deepgram — each plugin reads its
+    own key from the env. Fail clearly if the chosen provider's key is missing."""
+    if cfg.stt_provider == "soniox":
+        if not cfg.soniox_api_key:
+            raise RuntimeError("STT_PROVIDER=soniox but SONIOX_API_KEY is not set.")
+        from livekit.plugins import soniox
+
+        hints = [h.strip() for h in cfg.soniox_language_hints.split(",") if h.strip()]
+        return soniox.STT(
+            params=soniox.STTOptions(model=cfg.soniox_model, language_hints=hints)
+        )
+
+    if not cfg.deepgram_api_key:
+        raise RuntimeError("STT_PROVIDER=deepgram but DEEPGRAM_API_KEY is not set.")
+    from livekit.plugins import deepgram
+
+    return deepgram.STT(model=cfg.stt_model)
 
 
 server = AgentServer()

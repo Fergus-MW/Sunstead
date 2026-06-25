@@ -11,6 +11,8 @@ dependencies = [
     "livekit-plugins-anam>=1.6,<2",
     # Cognition (cascade pipeline). Swappable per PIPELINE_MODE — see config.py.
     "livekit-plugins-anthropic>=1.6,<2",
+    # STT: Soniox (streaming, default) or Deepgram — selected by STT_PROVIDER.
+    "livekit-plugins-soniox>=1.6,<2",
     "livekit-plugins-deepgram>=1.6,<2",
     "livekit-plugins-cartesia>=1.6,<2",
     "livekit-plugins-silero>=1.6,<2",
