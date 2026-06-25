@@ -18,6 +18,29 @@ the horizon over a layered pine forest.
   headless browser, or whichever joiner you prefer.
 - `src/app/globals.css` — orbit + morph keyframes for the midnight sun.
 - Landscape is an inline SVG inside `page.tsx` (layered hills + pines).
+- `src/app/graph/` — **knowledge-graph explorer** (`/graph`). A
+  zero-dependency canvas force-directed graph over `central-kg-api`.
+  `ForceGraph.tsx` is the renderer (repulsion + link springs + centering,
+  drag/zoom/pan, hover highlight, click-to-select); `page.tsx` is the
+  search + detail-panel + legend shell; `types.ts` mirrors the KG models.
+- `src/app/api/graph/` — server-side proxies to `central-kg-api`
+  (`/subgraph`, `/entity/{id}`) so the KG base URL and CORS stay
+  server-side. Configure via `KG_API_URL` (see `.env.example`).
+
+## Knowledge-graph explorer (`/graph`)
+
+The admin-style graph panel: search a term → `central-kg-api` returns the
+matching subgraph (hybrid OpenSearch→pgvector seed + recursive-CTE
+traversal) → it renders as an interactive force graph. Click a node for its
+properties, then **Expand neighbors** to grow the view one hop at a time.
+
+Point it at the KG service with `KG_API_URL` (defaults to
+`http://localhost:8000`). It needs `central-kg-api` running and a seeded
+graph — see [`../central-kg-api`](../central-kg-api).
+
+This is the first panel of a fuller admin dashboard; the live Kafka event
+feed + agent/task board are the planned next panels (they need the
+`agent-system/gateway` Kafka→WS bridge, currently a stub).
 
 ## Run it
 

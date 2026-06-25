@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 
 type Status =
@@ -178,6 +179,13 @@ export default function Home() {
           </div>
         )}
       </div>
+
+      <Link
+        href="/graph"
+        className="relative z-20 mx-auto mb-3 text-xs text-[#f3ead3]/60 underline-offset-4 transition-colors hover:text-[#f3ead3] hover:underline"
+      >
+        Explore the knowledge graph →
+      </Link>
 
       <p className="relative z-20 mb-4 text-center text-[10px] uppercase tracking-[0.4em] text-[#f3ead3]/40">
         24h daylight · midnight sun · perpetual quorum
