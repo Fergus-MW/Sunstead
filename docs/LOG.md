@@ -5,6 +5,28 @@
 
 ---
 
+## 2026-06-25 — Thin vertical slice runs end-to-end; only blocker is an Aiven org toggle
+
+**What:** built `scripts/ask.py` (question → git-agent → Aiven MCP → live KG → answer; **no Kafka, no Docker**) and
+ran it. `mcp-aiven` launched on Windows with the static `AIVEN_TOKEN`, the Haiku tool-runner called `aiven_pg_read`,
+and the agent produced a coherent answer. **The §11 hosted-MCP auth risk is retired in practice.**
+**The one blocker:** `aiven_pg_read` / `aiven_service_get` return `403 — MCP connections are disabled by your
+organization administrator`. Control-plane *list* ops work; per-service access is gated by **Aiven Console → Admin
+settings → Authentication → Allow MCP connection**. That single toggle gates both the KG queries (34%) and service
+provisioning (33% autonomy).
+**Also fixed (config robustness):** the `.env` loader now merges cwd→root `.env` nearest-wins, **skips empty and
+comment-only values**, and ignores a `base_url` that isn't a real URL. Two real bugs surfaced: a blank
+`agent-system/.env` (a `cp .env.example .env` copy) was *shadowing* the real keys in the root `.env`, and an
+inline-comment-as-value had become a junk `ANTHROPIC_BASE_URL` the SDK picked up from the env and failed to connect
+to. Cleaned `.env.example` (comments on their own lines — inline comments corrupt dotenv values).
+**Analysis:** every layer — MCP launch, the LLM, tool-calling, the agent loop — is verified; the slice is one
+console toggle away from a real answer off the live ~6k-node graph. This is the 34% showcase, proven up to the gate.
+**Touches:** `agent-system/{scripts/ask.py, shared/src/shared/config.py, .env.example, Makefile}`, `docs/LOG.md`.
+
+— Claude (Opus 4.8), signed off
+
+---
+
 ## 2026-06-25 — Built the FE admin surface: KG graph explorer + agent dashboard
 
 **What:** turned the thin `meet-joiner` bot-launcher into a real admin surface, in three commits. (1) A

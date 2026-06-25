@@ -100,12 +100,33 @@ class Settings:
     kafka: KafkaSettings = field(default_factory=KafkaSettings)
     mcp: McpSettings = field(default_factory=McpSettings)
 
+    def __post_init__(self) -> None:
+        # defensive: ignore a base_url that isn't a real URL (e.g. a stray
+        # inline-comment value copied from .env.example) — fall back to direct API.
+        if not self.anthropic_base_url.startswith("http"):
+            self.anthropic_base_url = ""
+
 
 def load() -> Settings:
-    """Load settings, pulling a local .env first if python-dotenv is available."""
+    """Load settings. Merge every .env from cwd up to the filesystem root,
+    nearest-wins, **skipping empty values** — so a blank template .env (e.g. a
+    fresh `agent-system/.env` from `cp .env.example .env`) can't shadow a real
+    key that lives in the repo-root .env. dotenv is an optional dev convenience.
+    """
     try:
-        from dotenv import load_dotenv  # optional, dev convenience
-        load_dotenv()
+        from pathlib import Path
+
+        from dotenv import dotenv_values
+
+        merged: dict[str, str] = {}
+        for d in reversed([Path.cwd(), *Path.cwd().parents]):  # farthest first → nearest overrides
+            p = d / ".env"
+            if p.exists():
+                for k, v in dotenv_values(p).items():
+                    if v and not v.lstrip().startswith("#"):  # ignore empty + comment-only values
+                        merged[k] = v
+        for k, v in merged.items():
+            os.environ.setdefault(k, v)
     except Exception:
         pass
     return Settings()

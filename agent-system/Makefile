@@ -9,3 +9,4 @@ run:     ; uv run python -m agent_runner
 gateway: ; uv run python -m agent_runner.gateway
 echo:    ; uv run python scripts/publish_task.py --intent echo --args '{"text":"hello"}'
 spike:   ; uv run python scripts/spike.py
+ask:     ; uv run python scripts/ask.py --question "$(Q)"
