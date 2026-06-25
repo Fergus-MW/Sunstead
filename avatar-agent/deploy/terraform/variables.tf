@@ -53,6 +53,19 @@ variable "ssh_key_name" {
   default     = ""
 }
 
+# ── Image build / rollout (build.tf) ──
+variable "auto_build" {
+  description = <<-EOT
+    When true (default), `terraform apply` builds the agent + dispatch images
+    from local source, pushes them to ECR tagged with a content hash, and rolls
+    them out — one command deploys the latest code. Needs docker + aws CLI on
+    PATH. Set false to keep the manual build/push flow and pin the *_image_tag
+    variables yourself.
+  EOT
+  type        = bool
+  default     = true
+}
+
 # ── Fargate agent worker ──
 variable "agent_image_tag" {
   description = "Image tag the Fargate service runs (push to the ECR repo this stack creates)."
