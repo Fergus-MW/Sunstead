@@ -194,15 +194,19 @@ export default function Home() {
 
       {/* Content */}
       <div className="relative z-20 mx-auto flex w-full max-w-xl flex-1 flex-col justify-center px-6 pb-[40vh] pt-20">
-        <div className="space-y-2 text-center">
+        <div className="space-y-3 text-center">
           <p className="text-[10px] uppercase tracking-[0.5em] text-[#f3ead3]/60">
             Sunstead · Lapland · 66°33′N
           </p>
-          <h1 className="font-serif text-3xl font-medium tracking-tight text-[#f3ead3] sm:text-4xl">
-            The sun never sets on this meeting
+          <h1 className="font-serif text-5xl font-medium tracking-[0.15em] text-[#f3ead3] sm:text-6xl">
+            Aino
           </h1>
-          <p className="text-sm italic text-[#f3ead3]/70">
-            Paste a Google Meet link. Aino will join your call.
+          <p className="text-sm text-[#f3ead3]/75">
+            The agent who joins your meetings.
+            <br />
+            <span className="italic text-[#f3ead3]/55">
+              The sun never sets.
+            </span>
           </p>
         </div>
 
