@@ -1,6 +1,11 @@
 output "livekit_eip" {
-  description = "Point A records for livekit_domain and livekit_turn_domain at this IP."
+  description = "LiveKit server IP. With a custom domain, point its A record(s) here."
   value       = aws_eip.livekit.public_ip
+}
+
+output "livekit_hostname" {
+  description = "Effective LiveKit hostname (auto sslip.io unless you set livekit_domain)."
+  value       = local.livekit_domain_effective
 }
 
 output "livekit_ws_url" {
@@ -33,6 +38,16 @@ output "dispatch_ecr_repo" {
   value       = aws_ecr_repository.dispatch.repository_url
 }
 
+output "agent_image" {
+  description = "Full agent image (repo:tag) the Fargate service is running."
+  value       = "${aws_ecr_repository.agent.repository_url}:${local.agent_image_tag_effective}"
+}
+
+output "dispatch_image" {
+  description = "Full dispatch image (repo:tag) the Lambda is running."
+  value       = "${aws_ecr_repository.dispatch.repository_url}:${local.dispatch_image_tag_effective}"
+}
+
 output "ecs_cluster" {
   description = "ECS cluster name (for force-new-deployment)."
   value       = aws_ecs_cluster.main.name
@@ -51,9 +66,4 @@ output "dispatch_function_url" {
 output "ssm_secret_params" {
   description = "SSM parameters to populate with real values before first run."
   value       = [for p in aws_ssm_parameter.provider_secret : p.name]
-}
-
-output "region" {
-  description = "AWS region this stack is deployed in (used by the build/push runbook)."
-  value       = var.region
 }

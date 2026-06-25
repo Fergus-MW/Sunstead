@@ -231,12 +231,27 @@ async def entrypoint(ctx: JobContext) -> None:
             "ANAM_AVATAR_ID is not set — pick an avatar/persona id from the Anam "
             "dashboard (lab.anam.ai) and set it in your .env."
         )
+    # Optionally cap Anam's output resolution (smoother video on the multi-hop
+    # path). 0/0 → Anam's model default. Anam rejects unsupported (w,h) pairs with
+    # HTTP 400, so this is deploy-configurable via ANAM_VIDEO_WIDTH/HEIGHT.
+    avatar_session_kwargs: dict = {}
+    if cfg.anam_video_width and cfg.anam_video_height:
+        avatar_session_kwargs["session_options"] = anam.SessionOptions(
+            video_width=cfg.anam_video_width,
+            video_height=cfg.anam_video_height,
+        )
+        logger.info(
+            "anam output capped to %dx%d",
+            cfg.anam_video_width,
+            cfg.anam_video_height,
+        )
     avatar = anam.AvatarSession(
         persona_config=anam.PersonaConfig(
             name=cfg.anam_avatar_name,
             avatarId=cfg.anam_avatar_id,
         ),
         api_key=cfg.anam_api_key,
+        **avatar_session_kwargs,
     )
     await avatar.start(session, room=ctx.room)
 

@@ -28,14 +28,15 @@ class Settings(BaseSettings):
 
     # ── Recall.ai (meeting transport) ──
     recall_api_key: str = Field(default="", alias="RECALL_API_KEY")
-    recall_region: str = Field(default="us-east-1", alias="RECALL_REGION")
-    bot_name: str = Field(default="Sunstead Avatar", alias="BOT_NAME")
-    # Compute size of Recall's bot VM. The default `web` is only 0.25 core / 750MB —
-    # too small to decode the Anam stream, render the viewer page, AND re-encode into
-    # the call without dropping frames. `web_4_core` (2.25c/5.25GB, $0.60/hr) is
-    # Recall's recommended floor for Output Media; `web_gpu` (6c/13GB + WebGL,
-    # $1.50/hr) is best if the avatar renders on canvas/WebGL.
-    recall_bot_variant: str = Field(default="web_4_core", alias="RECALL_BOT_VARIANT")
+    recall_region: str = Field(default="eu-central-1", alias="RECALL_REGION")
+    bot_name: str = Field(default="Aino", alias="BOT_NAME")
+    # Recall bot variant — the only fps lever in the pipeline, and it's discrete:
+    # "web" (default) renders the camera webpage at ~15 fps; "web_4_core" (4-core
+    # machine) sustains ~30 fps at a higher per-bot cost (+$0.10/hr over the PAYG
+    # base). No arbitrary value (e.g. 20) is possible. We keep "web" (15 fps) —
+    # already under any 20 fps target; override via RECALL_BOT_VARIANT if a call
+    # needs the smoother feed.
+    recall_bot_variant: str = Field(default="web", alias="RECALL_BOT_VARIANT")
 
     # ── LiveKit (orchestration transport) ──
     livekit_url: str = Field(default="", alias="LIVEKIT_URL")
@@ -56,6 +57,13 @@ class Settings(BaseSettings):
         default="edf6fdcb-acab-44b8-b974-ded72665ee26", alias="ANAM_AVATAR_ID"
     )
     anam_avatar_name: str = Field(default="Sunstead", alias="ANAM_AVATAR_NAME")
+    # Cap the avatar's output resolution to keep video smooth over the multi-hop
+    # path (Anam → LiveKit → Recall → Meet): lower res = less bandwidth = fewer
+    # dropped frames. 0/0 (default) → Anam uses the model's native size. Anam
+    # validates the (width, height) pair and rejects unsupported pairs with HTTP
+    # 400, so tune per-deploy rather than assuming an arbitrary pair works.
+    anam_video_width: int = Field(default=0, alias="ANAM_VIDEO_WIDTH")
+    anam_video_height: int = Field(default=0, alias="ANAM_VIDEO_HEIGHT")
 
     # ── Cognition ──
     pipeline_mode: PipelineMode = Field(default="realtime", alias="PIPELINE_MODE")
