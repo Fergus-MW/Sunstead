@@ -63,9 +63,10 @@ resource "aws_lambda_function" "dispatch" {
 
   environment {
     variables = {
-      LIVEKIT_URL = local.livekit_ws_url
-      VIEWER_URL  = local.viewer_url
-      BOT_NAME    = var.bot_name
+      LIVEKIT_URL   = local.livekit_ws_url
+      VIEWER_URL    = local.viewer_url
+      BOT_NAME      = var.bot_name
+      RECALL_REGION = var.recall_region
       # Resolve SSM SecureStrings at cold start via the pydantic-settings env.
       # (Lambda can't natively inject SSM like ECS, so the handler reads them.)
       LIVEKIT_API_KEY_SSM    = aws_ssm_parameter.livekit_api_key.name

@@ -96,6 +96,12 @@ variable "bot_name" {
   default     = "Sunstead Avatar"
 }
 
+variable "recall_region" {
+  description = "Recall.ai region your API key belongs to (must match the key, e.g. eu-central-1)."
+  type        = string
+  default     = "us-east-1"
+}
+
 variable "anam_avatar_name" {
   description = "Anam persona display name."
   type        = string
