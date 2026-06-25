@@ -15,9 +15,9 @@ Parameters:
     ConstraintDescription: Must be a CIDR like 203.0.113.4/32
   InstanceType:
     Type: String
-    Default: t3.medium
-    AllowedValues: [t3.small, t3.medium, t3.large]
-    Description: t3.medium (4 GB) recommended; the four procs + Node + matplotlib are tight on 2 GB.
+    Default: c7i-flex.large
+    AllowedValues: [c7i-flex.large, m7i-flex.large, t3.small, t3.medium, t3.large]
+    Description: c7i-flex.large (4 GB, free-tier-eligible) recommended. t3.medium/large need a paid account plan.
   RepoUrl:
     Type: String
     Default: https://github.com/Fergus-MW/Sunstead.git
@@ -26,7 +26,7 @@ Resources:
   SecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Sunstead agent suite — SSH only (app traffic via Cloudflare Tunnel, outbound).
+      GroupDescription: Sunstead agent suite - SSH only (app traffic via Cloudflare Tunnel, outbound).
       SecurityGroupIngress:
         - IpProtocol: tcp
           FromPort: 22
