@@ -263,8 +263,9 @@ for agents: `GET /query?q=`, `/subgraph`, `/entity/{id}`, `/timeline`; `POST /in
 Specialists (each a module the harness calls `run(task, ctx)`). Build **git first** (simplest, pure read), then
 **web** (best demo), then **data**; **meeting-ops** + **kg-writer** are roadmap, **reviewer** a stretch.
 
-- **git-agent** — `read_git`, `blame`, `who_changed`, `recent_changes`. Answers from the graph via `aiven_pg_read`.
-  **First milestone — §10.**
+- **git / KG-agent** — `read_git`, `blame`, `who_changed`, `recent_changes`, plus **`ask`** (general KG question
+  over any node/edge type). A config-driven, *general* knowledge-graph agent (answers code **and** knowledge
+  questions: decisions, meetings, people, policies) via `aiven_pg_read`. **First milestone — §10.**
 - **web-agent** — `build_website`, `update_website`. **Persistent workspace** (§5); codegen → build/smoke-check →
   `vercel_deploy` (Vercel API / Build Output API) → store deployment metadata. Returns a live URL.
 - **data-agent** — `analyze`, `summarize_metrics`, `query_data`. pandas/matplotlib; pulls rows via `aiven_pg_read`;

@@ -24,7 +24,7 @@ remaining risk is no longer "missing wires" — it's **proving the full happy-pa
 | Pillar | State | Reality |
 |---|---|---|
 | **Knowledge graph** (`central-kg-api/`) | ✅ **strongest** | Live Aiven Postgres+pgvector, **seeded ~6,183 nodes / 26,179 edges** from `anthropic-sdk-python`; runtime retrieval is hybrid **pgvector + trigram** (~125 ms). OpenSearch is mirrored at seed time (`seed/mirror_opensearch.py`) but not yet queried at runtime. Demo-bankable data exists *today*. |
-| **Agent suite** (`agent-system/`) | ✅ **MCP-native showpiece** | One container: warm `mcp-aiven` session, Kafka consumer, harness, **+ a planner** (`planner.py`) that turns `meeting.transcript` into delegated `agent.tasks.*`. **git-agent + web-agent both work** — git answers from the live graph via `aiven_pg_read` (verified: top authors 387/32/23 commits); web-agent generates a site with Claude and publishes it to a served URL. echo runs no-creds; **data-agent is still a stub**; web-agent is **local-serve only** (no Vercel yet). |
+| **Agent suite** (`agent-system/`) | ✅ **MCP-native showpiece** | One container: warm `mcp-aiven` session, Kafka consumer, harness, **+ a planner** (`planner.py`) that turns `meeting.transcript` into delegated `agent.tasks.*`. **git-agent, web-agent, and data-agent all work** — git answers from the live graph via `aiven_pg_read` (verified: top authors 387/32/23 commits); web-agent generates a site with Claude and publishes it to a served URL. echo runs no-creds; **data-agent renders charts** from the KG (SQL → matplotlib PNG artifact); web-agent is **local-serve only** (no Vercel yet). |
 | **Avatar / listener** (`avatar-agent/`, merged to `main`) | ✅ **the wow** | LiveKit + Recall + Anam talking-face; realtime STT→Sonnet→TTS; full Terraform. Reads the KG over HTTP to `central-kg-api` (correct for the latency-bound realtime layer), and **delegates heavy work via a wired `delegate()` tool** → gateway `POST /tasks` → Kafka `agent.tasks.*` ([tools.py](../avatar-agent/src/avatar_agent/tools.py)). Code-complete; prod just needs `GATEWAY_URL` injected (the Terraform doesn't set it yet). |
 | **Frontend** (`meet-joiner/`) | 🟡 **growing** | Next.js bot-launcher (`POST /api/join`) **+ a knowledge-graph explorer** (`/graph`, zero-dep canvas force graph over `central-kg-api`) **+ an agent dashboard** (`/dashboard`: live feed + task board + ask box over the gateway's `WS /stream` / `POST /tasks`). Still missing the in-call transcript overlay. The dashboard's e2e path (gateway↔Kafka↔runner) and `/graph` over the live KG are **both verified running locally**; degrades gracefully when a backend is down. |
 
@@ -33,7 +33,7 @@ planner → `agent.tasks.*` → runner → `agent.results` → gateway WS → da
 recorded run of the full happy-path, and a cloud deployment. Dispatch is proven on local redpanda; **Aiven Kafka is
 provisioned** (`kafka-254bd14f`, RUNNING, 9 topics created via MCP — see [LOG.md](LOG.md)), so the remaining deploy
 step is just pointing the runner/gateway at it (bootstrap + SASL creds). A few capability spots are still hollow:
-**data-agent (stub), embeddings (`embeddings.py` is a no-op → semantic search degrades to trigram), web-agent
+**embeddings (`embeddings.py` is a no-op → semantic search degrades to trigram), web-agent
 (local-serve, no Vercel), and the FE in-call transcript overlay (missing).**
 
 ## 3. Repo map — where the code actually is
