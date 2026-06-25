@@ -6,9 +6,12 @@ Topic names live here so every component and the admin script agree. Defaults ar
 
 from __future__ import annotations
 
+import logging
 import os
 import sys
 from dataclasses import dataclass, field
+
+logger = logging.getLogger("shared.config")
 
 
 # --- topics (single source of truth) -------------------------------------
@@ -62,6 +65,15 @@ def _int(key: str, default: int) -> int:
         return default
 
 
+# --- knowledge-graph datastore (single source) ---------------------------
+# The Aiven Postgres holding the central KG; agents target it via MCP pg_read.
+# Read at import (like the topic names above) so they're usable in agents'
+# module-level system prompts.
+KG_PROJECT = _env("KG_PROJECT", "jq01")
+KG_SERVICE = _env("KG_SERVICE", "central-kg-pg")
+KG_DB = _env("KG_DB", "defaultdb")
+
+
 @dataclass
 class KafkaSettings:
     bootstrap: str = field(default_factory=lambda: _env("KAFKA_BOOTSTRAP", "localhost:19092"))
@@ -103,6 +115,7 @@ class Settings:
     anthropic_api_key: str = field(default_factory=lambda: _env("ANTHROPIC_API_KEY"))
     anthropic_base_url: str = field(default_factory=lambda: _env("ANTHROPIC_BASE_URL"))
     model_smart: str = field(default_factory=lambda: _env("MODEL_SMART", "claude-opus-4-8"))
+    model_mid: str = field(default_factory=lambda: _env("MODEL_MID", "claude-sonnet-4-6"))
     model_fast: str = field(default_factory=lambda: _env("MODEL_FAST", "claude-haiku-4-5"))
     sessions_dir: str = field(default_factory=lambda: _env("SESSIONS_DIR", "./.sessions"))
     max_concurrency: int = field(default_factory=lambda: _int("MAX_CONCURRENCY", 8))
@@ -143,6 +156,8 @@ def load() -> Settings:
                         merged[k] = v
         for k, v in merged.items():
             os.environ.setdefault(k, v)
-    except Exception:
-        pass
+    except ImportError:
+        pass  # python-dotenv is an optional dev dependency; prod uses the real env
+    except Exception:  # a malformed/unreadable .env shouldn't be invisible
+        logger.debug("failed to merge .env files", exc_info=True)
     return Settings()

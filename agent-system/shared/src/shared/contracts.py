@@ -56,11 +56,19 @@ TaskIntent = Literal[
 ]
 
 
+# How much depth/cost a task should spend. The planner picks it from the speaker's wording
+# ("just check" → quick; "dig into / thorough" → deep); each agent maps it to concrete budgets
+# (model tier, web-search count, turn limit) via shared.effort. The default keeps every existing
+# producer (the gateway ask-box, replayed old messages) on the capable middle tier.
+Effort = Literal["quick", "standard", "deep"]
+
+
 class TaskCreatePayload(BaseModel):
     task_id: str
     intent: TaskIntent
     args: dict = Field(default_factory=dict)
     context_refs: list[str] = Field(default_factory=list)  # pointers into KG, not blobs
+    effort: Effort = "standard"                            # depth/cost tier (shared.effort); planner-chosen
     # harness fields (docs/AGENT_SYSTEM.md §4)
     idempotency_key: str | None = None                     # dedupe redelivery; defaults to task_id
     workspace_id: str | None = None                        # web-agent persistent workspace

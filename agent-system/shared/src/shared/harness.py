@@ -12,6 +12,7 @@ Emits (`agent.activity`, `agent.results`) are **direct Kafka produces** — no L
 from __future__ import annotations
 
 import asyncio
+from collections import deque
 from datetime import datetime, timezone
 from typing import Awaitable, Callable
 
@@ -25,8 +26,26 @@ from .sessions import SessionStore
 from .verify import verify_grounding
 
 
+SEEN_MAX = 4096  # idempotency-key dedupe window (FIFO) — bounds memory in a long-lived runner
+
+
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def first_arg(args: dict, *keys: str, default: str = "") -> str:
+    """First non-empty string among task.args[keys], else `default`.
+
+    One place for the `args.get("question") or args.get("q") or …` chains every
+    agent grew. Each caller still names its own keys (so a producer template that
+    sends `{path}` against an agent reading `question` stays visible), but the
+    fallback mechanics — and the empty-string coercion — live here.
+    """
+    for k in keys:
+        v = args.get(k)
+        if isinstance(v, str) and v.strip():
+            return v
+    return default
 
 
 class AgentContext:
@@ -38,7 +57,8 @@ class AgentContext:
         self.mcp = mcp                      # shared.mcp.AivenMCP | None
         self.anthropic = anthropic          # AsyncAnthropic | None
         self.store = SessionStore(settings.sessions_dir)
-        self._seen: set[str] = set()        # idempotency (in-memory; durable later)
+        self._seen: set[str] = set()              # idempotency (in-memory; durable later)
+        self._seen_order: deque[str] = deque()    # insertion order, to FIFO-evict `_seen` past SEEN_MAX
         self._bg: set[asyncio.Task] = set()  # detached post-emit work (async verifier), kept referenced
 
     async def _activity(self, meeting_id: str, task_id: str, status: str, detail: str | None) -> None:
@@ -119,6 +139,9 @@ async def run_task(env: Envelope[TaskCreatePayload], agent: AgentFn, ctx: AgentC
     if idem in ctx._seen:                                   # claim / dedupe (at-least-once)
         return
     ctx._seen.add(idem)
+    ctx._seen_order.append(idem)
+    if len(ctx._seen_order) > SEEN_MAX:                     # FIFO-evict to bound memory (cf. planner)
+        ctx._seen.discard(ctx._seen_order.popleft())
 
     tctx = TaskCtx(ctx, env.meeting_id, task.task_id)
     await tctx.activity("received", task.intent)

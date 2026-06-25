@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import uuid
 from collections import OrderedDict, deque
 
@@ -68,7 +69,36 @@ Agents and the intents they handle:
     OUR codebase/meetings, and research-agent for the outside world.
 
 One utterance may imply more than one task (e.g. "build a landing page and tell me who owns auth" → two tasks).
-Rewrite each request into a clean, self-contained `question`/`brief` — the agent does not see the conversation."""
+Rewrite each request into a clean, self-contained `question`/`brief` — the agent does not see the conversation.
+
+Worked examples — what to propose for a range of utterances. Backchannel and ordinary chatter map to NO tasks;
+a clear ask maps to one task; a compound ask maps to two. Study the boundary between conversation and a real request:
+
+1. "yeah totally, that makes sense" → no tasks. (Backchannel / agreement — nothing to do.)
+2. "haha nice, anyway where were we" → no tasks. (Smalltalk — no actionable request.)
+3. "I think the rollout went fine yesterday" → no tasks. (A statement of opinion, not a request for work.)
+4. "let's circle back on the pricing thing later" → no tasks. (Deferral — no work to start now.)
+5. "can you build a landing page for the new launch?" → one task:
+     web-agent `build_website`, args {{"brief": "A landing page for the new product launch"}}.
+6. "who was the last person to touch the auth module?" → one task:
+     git-agent `who_changed`, args {{"question": "Who last changed the auth module?"}}.
+7. "what's the current pricing for the Aiven Kafka managed tier?" → one task:
+     research-agent `research`, args {{"question": "Current pricing for Aiven's managed Kafka tier"}}.
+8. "can you recap the meeting so far and capture the action items?" → two tasks:
+     meeting-ops `recap` (args {{}}) and meeting-ops `action_items` (args {{}}).
+9. "build a quick dashboard site and tell me who owns the metrics pipeline" → two tasks:
+     web-agent `build_website`, args {{"brief": "A quick dashboard site for the metrics"}}; and
+     git-agent `who_changed`, args {{"question": "Who owns the metrics pipeline?"}}.
+10. "let's ship it 🚀" → no tasks. (Enthusiasm, not a delegable request.)
+
+When in doubt about whether an utterance is conversation or a request, prefer NO tasks — a spurious task is worse \
+than a missed backchannel, and a genuinely-needed request will usually be restated more explicitly.
+
+For each task you DO propose, also pick an `effort` — how much depth the request warrants, read from the speaker's \
+wording. "quick" = a fast lookup or ballpark ("just check…", "quick question", "roughly"). "standard" = a normal \
+request with no explicit depth signal (use when unsure). "deep" = an explicit ask for thoroughness ("dig into…", \
+"research properly", "compare them all", "in depth"). Spend the least that satisfies the request; only choose \
+"deep" when the speaker clearly asked for thoroughness."""
 
 PLAN_TOOL = {
     "name": "propose_tasks",
@@ -90,6 +120,11 @@ PLAN_TOOL = {
                             "type": "string",
                             "description": "One short phrase: why this task, for the visible activity feed.",
                         },
+                        "effort": {
+                            "type": "string",
+                            "enum": ["quick", "standard", "deep"],
+                            "description": "How much depth/cost this task warrants, from the speaker's wording. Default standard.",
+                        },
                     },
                     "required": ["intent", "args"],
                 },
@@ -100,12 +135,103 @@ PLAN_TOOL = {
 }
 
 
+def _cached_system(text: str) -> list[dict]:
+    """The system prompt as a single cacheable block — Opus 4.8 / Haiku 4.5 cache prefixes >= 4096 tokens,
+    so the fattened few-shot prompt is what makes caching engage. Keep this byte-stable: no timestamps /
+    meeting_id in here (those would invalidate the prefix every utterance). The per-utterance text rides in
+    `messages`, after the breakpoint."""
+    return [{"type": "text", "text": text, "cache_control": {"type": "ephemeral"}}]
+
+
+# Zero-LLM keyword pre-filter — words/phrases that plausibly signal a request. Tuned HIGH-RECALL: unsure → True.
+# This only ever *skips* obvious non-requests (backchannel); anything ambiguous falls through to the gate/Opus.
+_REQUEST_WORDS = {
+    "build", "make", "create", "update", "change", "edit", "fix", "add", "remove", "set",
+    "find", "look", "search", "lookup", "research", "check", "investigate", "pull",
+    "who", "what", "when", "where", "why", "how", "which", "whose",
+    "recap", "summary", "summarize", "summarise", "analyze", "analyse", "analysis",
+    "show", "draft", "generate", "write", "compile", "list", "compare", "review",
+    "tell", "explain", "describe", "recall", "remember", "capture", "record", "note",
+    "chart", "graph", "plot", "diagram", "report", "decision", "decisions", "action", "actions",
+    "recent", "changed", "owns", "owner",
+}
+_REQUEST_PHRASES = ("can you", "could you", "would you", "will you", "please", "pull up",
+                    "look up", "let me know", "i need", "we need", "i want", "we want")
+
+
+def _maybe_actionable(text: str) -> bool:
+    """High-recall, zero-LLM gate: could this utterance plausibly contain a request? Unsure → True.
+    Only returns False for utterances that clearly carry no request signal (e.g. 'yeah totally')."""
+    low = text.lower()
+    if "?" in low:
+        return True
+    if any(p in low for p in _REQUEST_PHRASES):
+        return True
+    words = set(re.findall(r"[a-z']+", low))
+    return bool(words & _REQUEST_WORDS)
+
+
+GATE_TOOL = {
+    "name": "classify_utterance",
+    "description": "Report whether this meeting utterance could be an actionable request for one of our agents.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "actionable": {
+                "type": "boolean",
+                "description": (
+                    "True if the utterance could be a request our agents can fulfil — build/update a site, "
+                    "a question about our codebase/history, a data/metrics chart, a meeting recap / action-items / "
+                    "decisions capture, or live web research. False for backchannel, smalltalk, opinions, or chatter."
+                ),
+            }
+        },
+        "required": ["actionable"],
+    },
+}
+
+GATE_SYSTEM = """You are a fast pre-filter for Sunstead's planner. You see one utterance from a live meeting \
+transcript (with a little preceding context) and decide ONE thing: could it be an actionable request for one of \
+our specialist agents — build/update a website, a question about our codebase or its history, a data/metrics chart, \
+a meeting recap / action-items / decisions capture, or live web research?
+
+Answer True if it plausibly could be such a request; answer False for ordinary conversation: backchannel \
+("yeah totally"), smalltalk, opinions, agreement, or thinking out loud. When genuinely unsure, answer True — a \
+heavier model downstream makes the real decision, so a false True is cheap but a false False drops a real request."""
+
+
+async def gate_utterance(anthropic, model_fast: str, text: str, recent_context: str = "") -> bool:
+    """Cheap Haiku forced-tool classify: could this utterance be an actionable request? Returns a bool.
+
+    Fails OPEN: any exception, or an unreadable/ambiguous response, returns True so the utterance still
+    reaches the Opus planner. Haiku does NOT support output_config.effort, so we don't pass it."""
+    user = text if not recent_context else f"Recent context:\n{recent_context}\n\nUtterance to classify:\n{text}"
+    try:
+        resp = await anthropic.messages.create(
+            model=model_fast,
+            max_tokens=256,
+            system=_cached_system(GATE_SYSTEM),
+            tools=[GATE_TOOL],
+            tool_choice={"type": "tool", "name": "classify_utterance"},
+            messages=[{"role": "user", "content": user}],
+        )
+    except Exception as e:
+        log.warning("gate failed for %r (failing open to Opus): %s", text[:60], e)
+        return True
+    for block in resp.content:
+        if getattr(block, "type", None) == "tool_use" and block.name == "classify_utterance":
+            if isinstance(block.input, dict) and isinstance(block.input.get("actionable"), bool):
+                return block.input["actionable"]
+    # couldn't read a clear answer — fail open to Opus
+    return True
+
+
 async def plan_utterance(anthropic, model: str, text: str) -> list[dict]:
     """Ask the model to turn one utterance into zero or more tasks. Returns [] on nothing actionable."""
     resp = await anthropic.messages.create(
         model=model,
         max_tokens=1024,
-        system=PLANNER_SYSTEM,
+        system=_cached_system(PLANNER_SYSTEM),
         tools=[PLAN_TOOL],
         tool_choice={"type": "tool", "name": "propose_tasks"},
         messages=[{"role": "user", "content": text}],
@@ -123,12 +249,16 @@ async def _delegate(producer, meeting_id: str, plan_id: str, spec: dict) -> str:
     intent = spec["intent"]
     topic = config.TASK_TOPIC_BY_INTENT[intent]
     task_id = "tsk_" + uuid.uuid4().hex[:8]
+    # the model picks effort under an enum, but coerce defensively — an off-enum value must not
+    # fail the whole delegation; fall back to the capable middle tier.
+    effort = spec.get("effort") if spec.get("effort") in ("quick", "standard", "deep") else "standard"
     env = Envelope[TaskCreatePayload](
         type="task.create", meeting_id=meeting_id, ts=now_iso(),
         payload=TaskCreatePayload(
             task_id=task_id, intent=intent, args=spec.get("args") or {},
             idempotency_key=task_id, requested_by="planner",
             parent_task_id=plan_id, depth=1,                       # group an utterance's tasks under one plan
+            effort=effort,
         ),
     )
     await publish(producer, topic, env, key=task_id)
@@ -139,7 +269,7 @@ async def _delegate(producer, meeting_id: str, plan_id: str, spec: dict) -> str:
                                 detail=spec.get("reason") or intent),
     )
     await publish(producer, config.ACTIVITY, activity, key=task_id)
-    log.info("delegated %s -> %s (task %s): %s", intent, topic, task_id, spec.get("reason") or "")
+    log.info("delegated %s [effort=%s] -> %s (task %s): %s", intent, effort, topic, task_id, spec.get("reason") or "")
     return task_id
 
 
@@ -201,9 +331,21 @@ async def main() -> None:
             if len(text) < 8 or not first_time(env.id):
                 continue
 
-            # record the utterance in the meeting's rolling transcript before planning
+            # record the utterance in the meeting's rolling transcript before planning — even non-actionable
+            # utterances are meeting-ops context (recap/action-items see them), so this must run first.
             speaker = (env.payload.speaker.name if env.payload.speaker else None) or "Speaker"
-            roll(env.meeting_id).append(f"{speaker}: {text}")
+            dq = roll(env.meeting_id)
+            dq.append(f"{speaker}: {text}")
+
+            # Two cheap gates before the expensive Opus call, each failing OPEN to Opus:
+            # 1) zero-LLM keyword pre-filter — skip utterances with no request signal at all (e.g. "yeah totally").
+            if not _maybe_actionable(text):
+                continue
+            # 2) Haiku fast-classify — only spend Opus when this plausibly is an actionable request. The last
+            #    1-2 buffered utterances are passed as context so the gate sees the immediate conversation.
+            recent_context = "\n".join(list(dq)[-2:])
+            if not await gate_utterance(anthropic, s.model_fast, text, recent_context):
+                continue
 
             try:
                 tasks = await plan_utterance(anthropic, s.model_smart, text)

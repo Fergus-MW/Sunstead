@@ -10,11 +10,24 @@ agent-runner container**. Dispatch is **pure Kafka**; every KG read/write goes t
 ## Layout
 | Path | What |
 |---|---|
-| `shared/` | `contracts` (pydantic) · `kafka` (PLAINTEXT/SASL) · `mcp` (warm Aiven MCP) · `harness` (lifecycle) · `streaming` (trace deltas) · `sessions` · `config` |
-| `agent-runner/` | one image, run several ways: the **runner** (Kafka consumer → harness → `agents/{echo,git,web,data}`), the **planner** (transcript→tasks), and the **gateway** (HTTP `/tasks` + WS `/stream`) |
+| `shared/` | `contracts` (pydantic) · `kafka` (PLAINTEXT/SASL) · `mcp` (warm Aiven MCP, evidence-recording) · `harness` (lifecycle) · `verify` (grounding gate) · `streaming` (trace deltas) · `sessions` · `config` |
+| `agent-runner/` | one image, run several ways: the **runner** (Kafka consumer → harness → `agents/{echo,git,web,data,meeting,research}`, + a broadcast control consumer for cancel), the **planner** (transcript→tasks, the single delegation brain), and the **gateway** (HTTP `/tasks` + `/transcript` + `/control` + WS `/stream`) |
 | `infra/kafka_admin.py` | create topics idempotently (local + Aiven) |
 | `scripts/` | `kafka_smoke`/`publish_task` (drive the bus) · `say` (speak into a meeting) · `ask` (direct slice) · `spike`/`ingest_kg` (Aiven MCP) · `serve_sites` (web-agent host) · `fetch_kafka_creds` (Aiven Kafka mTLS) |
 | `Dockerfile` · `docker-compose.yml` | one image + the whole local stack (redpanda + topics + runner + planner + gateway + sites) |
+
+## Agents (intent → topic)
+| Agent | Intents | Topic | What it does |
+|---|---|---|---|
+| **git / KG** | `ask` · `read_git` · `who_changed` · `blame` · `recent_changes` | `agent.tasks.git` | Answers code **and** knowledge questions from the live graph via `aiven_pg_read`. Canned fast path (templated SQL + cache + one Haiku phrasing turn) for the known intents; agentic LLM path for `ask`. Emits `_verify` evidence for the grounding gate. |
+| **web** | `build_website` · `update_website` | `agent.tasks.web` | Claude generates a one-file site (streamed), publishes to `SITES_DIR/<task>/`, returns a `url` artifact. Persistent revisioned workspace by `workspace_id`. |
+| **data** | `analyze` · `summarize_metrics` · `query_data` | `agent.tasks.data` | Strict-tool turn → SQL + chart spec; runs SQL via MCP; renders a matplotlib PNG (off-thread) → insight + chart artifact. Emits `_verify` evidence. |
+| **meeting-ops** | `recap` · `action_items` · `decisions` | `agent.tasks.ops` | Strict-tool extraction over a transcript window; **writes outcomes back into the KG** via `aiven_pg_write` (idempotent slug-keyed upserts: action_item/decision nodes + `in_meeting`/`owns` edges). |
+| **research** | `research` | `agent.tasks.research` | Claude server-side `web_search`/`web_fetch` (adaptive thinking, bounded turns) → answer + sources as artifacts; streams to `agent.trace`. |
+| **echo** | `echo` | `agent.tasks.dev` | No-creds smoke test — proves the consume→harness→emit loop. |
+
+Every agent runs the same harness lifecycle (validate → dedupe → run → grounding-verify → emit); the verifier is
+annotate-only / fail-open, and any running task is cancellable via `agent.control`.
 
 ## Quickstart — the whole stack, one command
 ```bash
