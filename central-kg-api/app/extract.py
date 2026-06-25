@@ -3,29 +3,31 @@ from __future__ import annotations
 import json
 import logging
 import re
-from typing import Any
+from typing import Any, get_args
 
 from .config import get_settings
+from .models import EdgeType, NodeType
 
 logger = logging.getLogger(__name__)
 
+# Build the allowed-type lists from the single source of truth (models.py) so the
+# extraction prompt can never drift from the schema the frontend/seed also mirror.
+_NODE_TYPES = ", ".join(get_args(NodeType))
+_EDGE_TYPES = ", ".join(get_args(EdgeType))
 
-SYSTEM_PROMPT = """You are an extraction engine for a real-time agent knowledge graph.
-Read the SOURCE text and return STRICT JSON with two arrays: "nodes" and "edges".
-
-Allowed node types: person, company, meeting, task, workflow, requirement, feature,
-user_story, code_module, product, source_document, topic, decision.
-
-Allowed edge types: depends_on, discussed_in, implements, relates_to, derived_from,
-assigned_to, blocks, mentions, part_of, owns.
-
-Rules:
-- Each node has: {"type": <allowed>, "name": <short canonical name>, "properties": {...}}.
-- Each edge has: {"source": {"type":..,"name":..}, "target": {"type":..,"name":..}, "type": <allowed>, "properties": {...}}.
-- Use short, canonical names (no surrounding quotes, no markdown).
-- Prefer fewer high-signal nodes/edges over many low-signal ones.
-- Output JSON ONLY. No prose, no code fences.
-"""
+SYSTEM_PROMPT = (
+    "You are an extraction engine for a real-time agent knowledge graph.\n"
+    'Read the SOURCE text and return STRICT JSON with two arrays: "nodes" and "edges".\n\n'
+    f"Allowed node types: {_NODE_TYPES}.\n\n"
+    f"Allowed edge types: {_EDGE_TYPES}.\n\n"
+    "Rules:\n"
+    '- Each node has: {"type": <allowed>, "name": <short canonical name>, "properties": {...}}.\n'
+    '- Each edge has: {"source": {"type":..,"name":..}, "target": {"type":..,"name":..}, '
+    '"type": <allowed>, "properties": {...}}.\n'
+    "- Use short, canonical names (no surrounding quotes, no markdown).\n"
+    "- Prefer fewer high-signal nodes/edges over many low-signal ones.\n"
+    "- Output JSON ONLY. No prose, no code fences.\n"
+)
 
 
 def _strip_json_fence(s: str) -> str:

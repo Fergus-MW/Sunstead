@@ -25,18 +25,23 @@ NODE_TYPE_FOR_FILE_TYPE: dict[str, str] = {
     "spreadsheet": "source_document",
 }
 
-# graphify relation → our edges.type. Anything unmapped falls through to "relates_to".
+# graphify relation → our edges.type. Targets MUST stay within the canonical
+# EdgeType vocabulary (app/models.py), which the extract prompt and the frontend
+# edge-label map also mirror — emitting an out-of-vocab type here strands seeded
+# edges with a relation the rest of the system doesn't know. The precise graphify
+# relation is preserved in properties.graphify_relation, so no fidelity is lost.
+# Anything unmapped falls through to "relates_to".
 EDGE_TYPE_FOR_RELATION: dict[str, str] = {
-    "imports": "imports",
-    "imports_from": "imports",
-    "calls": "calls",
+    "imports": "depends_on",
+    "imports_from": "depends_on",
+    "calls": "depends_on",
     "method": "part_of",
     "contains": "part_of",
     "inherits": "derived_from",
     "uses": "relates_to",
     "references": "relates_to",
-    "re_exports": "re_exports",
-    "rationale_for": "rationale_for",
+    "re_exports": "relates_to",
+    "rationale_for": "relates_to",
     "conceptually_related_to": "relates_to",
 }
 

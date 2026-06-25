@@ -29,6 +29,13 @@ CREATE INDEX IF NOT EXISTS nodes_name_trgm_idx ON nodes USING gin (name gin_trgm
 CREATE INDEX IF NOT EXISTS nodes_embedding_idx ON nodes USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
 CREATE UNIQUE INDEX IF NOT EXISTS nodes_type_name_uniq ON nodes (type, lower(name));
 
+-- meeting_id promoted out of properties JSONB into an indexed generated column so meeting-scoped
+-- reads (the orchestrator's per-meeting memory / grounding) don't sequential-scan. Idempotent;
+-- safe to re-run against the live DB. See DESIGN §6 "KG data model — one graph, two layers".
+ALTER TABLE nodes ADD COLUMN IF NOT EXISTS meeting_id TEXT
+    GENERATED ALWAYS AS (properties->>'meeting_id') STORED;
+CREATE INDEX IF NOT EXISTS nodes_meeting_idx ON nodes(meeting_id);
+
 CREATE TABLE IF NOT EXISTS edges (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     source_node_id  UUID NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,

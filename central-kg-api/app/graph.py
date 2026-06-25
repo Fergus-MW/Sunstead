@@ -299,3 +299,54 @@ async def bulk_embed_nodes(session: AsyncSession, nodes_in: list[Node]) -> None:
             text("UPDATE nodes SET embedding = :v, updated_at = now() WHERE id = :id"),
             {"v": v, "id": n.id},
         )
+
+
+async def persist_extracted_graph(
+    session: AsyncSession,
+    graph: dict[str, Any],
+    source_id: UUID | None,
+) -> tuple[list[Node], list[Edge]]:
+    """Upsert an extracted ``{"nodes": [...], "edges": [...]}`` graph and batch-embed
+    the new nodes. Nodes go first, building a (type, lower(name)) → id map; edges then
+    resolve each endpoint from that map, falling back to a by-ref lookup for nodes that
+    already existed, and skip any edge whose endpoints can't be resolved. The caller
+    owns the transaction (this never commits). Shared by /ingest and /extract.
+    """
+    nodes: list[Node] = []
+    ref_to_id: dict[tuple[str, str], UUID] = {}
+    for n in graph["nodes"]:
+        node = await upsert_node(
+            session,
+            type_=n["type"],
+            name=n["name"],
+            properties=n.get("properties") or {},
+            source_id=source_id,
+        )
+        ref_to_id[(n["type"], n["name"].lower())] = node.id
+        nodes.append(node)
+
+    edges: list[Edge] = []
+    for e in graph["edges"]:
+        s, t = e["source"], e["target"]
+        s_id = ref_to_id.get((s["type"], s["name"].lower()))
+        t_id = ref_to_id.get((t["type"], t["name"].lower()))
+        if s_id is None:
+            existing = await get_node_by_ref(session, s["type"], s["name"])
+            s_id = existing.id if existing else None
+        if t_id is None:
+            existing = await get_node_by_ref(session, t["type"], t["name"])
+            t_id = existing.id if existing else None
+        if not s_id or not t_id:
+            continue
+        edge = await upsert_edge(
+            session,
+            source_node_id=s_id,
+            target_node_id=t_id,
+            type_=e["type"],
+            properties=e.get("properties") or {},
+            source_id=source_id,
+        )
+        edges.append(edge)
+
+    await bulk_embed_nodes(session, nodes)
+    return nodes, edges

@@ -29,20 +29,26 @@ inside `/query` and `/subgraph`.
 
 ## API surface
 
-| Method | Path              | Purpose                                                         |
-| ------ | ----------------- | --------------------------------------------------------------- |
-| POST   | `/ingest`         | Add a raw source; optionally trigger Claude extraction          |
-| POST   | `/extract`        | Run Claude extraction over text or an existing source           |
-| POST   | `/node`           | Upsert a node by (type, name)                                   |
-| POST   | `/link`           | Upsert an edge (by ids or by `(type,name)` refs)                |
-| GET    | `/query?q=…`      | Hybrid search → ranked nodes + focused subgraph                 |
-| GET    | `/entity/{id}`    | A node plus its 1–N hop neighborhood                            |
-| GET    | `/subgraph`       | BFS subgraph around `center=` ids or seeded by `q=`             |
-| POST   | `/update`         | Append an event; bumps the related node's `updated_at`          |
-| GET    | `/timeline`       | Time-ordered events, optionally filtered by node / kind / since |
-| GET    | `/health`         | Liveness                                                        |
+| Method | Path                  | Purpose                                                         |
+| ------ | --------------------- | --------------------------------------------------------------- |
+| POST   | `/ingest`             | Add a raw source; optionally trigger Claude extraction          |
+| GET    | `/source/{id}`        | Fetch the raw source row                                        |
+| POST   | `/extract`            | Run Claude extraction over text or an existing source           |
+| POST   | `/node`               | Upsert a node by (type, name)                                   |
+| GET    | `/node?type=&name=`   | Find nodes by type/name filter (no UUID needed)                 |
+| POST   | `/link`               | Upsert an edge (by ids or by `(type,name)` refs)                |
+| GET    | `/query?q=…`          | Hybrid search (pgvector + trigram) → ranked nodes + subgraph    |
+| GET    | `/search?q=…`         | **OpenSearch BM25** search → ranked nodes + subgraph (trigram fallback if OpenSearch is down) |
+| GET    | `/entity/{id}?hops=N` | A node plus its N-hop neighborhood                              |
+| GET    | `/overview`           | No-query landing view: the graph's busiest hubs + neighborhoods |
+| GET    | `/subgraph`           | BFS subgraph around `center=` ids or seeded by `q=` (`hops`, `node_limit`) |
+| POST   | `/update`             | Append an event; bumps the related node's `updated_at`          |
+| GET    | `/timeline`           | Time-ordered events, optionally filtered by node / kind / since |
+| GET    | `/health`             | Liveness                                                        |
 
-OpenAPI is at `/docs`.
+OpenAPI is at `/docs`. Entity/relationship extraction (`/ingest` + `/extract`) is centralized through one
+`graph.persist_extracted_graph()` upsert; the extraction prompt's node/edge vocabulary is generated from
+`app/models.py` so it never drifts from the schema.
 
 ## Run locally
 

@@ -18,6 +18,15 @@ OPENSEARCH_URL=https://avnadmin:PASS@host:port \
 
 Both read `central-kg-api/.env` for `DATABASE_URL` and `OPENSEARCH_URL`.
 
+## Edge types are mapped to the canonical vocabulary
+
+`graphify_adapter.py` maps each graphify relation onto the canonical `EdgeType`
+vocabulary in `app/models.py` (`EDGE_TYPE_FOR_RELATION`): `imports`/`imports_from`/
+`calls` → `depends_on`, `re_exports`/`rationale_for` → `relates_to`, etc. The precise
+graphify relation is preserved in `properties.graphify_relation`, so nothing is lost —
+but seeded edges stay within the schema the extraction prompt and the frontend
+recognise (you'll see `depends_on`, not `IMPORTS`/`CALLS`).
+
 ## Why this lives outside the FastAPI
 
 Per `docs/PLAN.md §3.5`, the dominant agent → graph path goes through Aiven MCP
