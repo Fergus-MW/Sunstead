@@ -152,12 +152,14 @@ def _resolve_mentions(
 
     # Code: substring match of curated tokens, weighted by distinctiveness.
     # We accept any match with score >= 0.3 (drops tokens appearing >10x).
+    # Match is "alpha-numeric boundary" — a leading underscore on the token
+    # in dialogue (`_streaming.py`) still counts as a hit on `streaming`.
+    # Trailing alnums don't (so `streaming` should NOT match `streaming_v2`).
     cc: set[str] = set()
     for token, nid, score in code_index:
         if score < 0.3:
             continue
-        # Word-boundary match so "Stream" doesn't fire on "Streaming"
-        if re.search(rf"(?<![A-Za-z0-9_]){re.escape(token)}(?![A-Za-z0-9_])", text):
+        if re.search(rf"(?<![A-Za-z0-9]){re.escape(token)}(?![A-Za-z0-9])", text):
             cc.add(nid)
     return list(cc), list(pp)
 
