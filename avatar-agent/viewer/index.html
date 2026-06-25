@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sunstead Avatar — Recall viewer</title>
+    <style>
+      /* This page IS the bot's camera frame. Fill it edge-to-edge, no chrome. */
+      html, body { margin: 0; height: 100%; background: #05060a; overflow: hidden; }
+      #stage { position: fixed; inset: 0; display: grid; place-items: center; }
+      video { width: 100%; height: 100%; object-fit: cover; background: #05060a; }
+      #status {
+        position: fixed; bottom: 12px; left: 12px; font: 12px/1.4 system-ui, sans-serif;
+        color: #9fb4d8; background: rgba(0,0,0,.45); padding: 6px 10px; border-radius: 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="stage">
+      <!-- The Anam avatar's video track is attached here; its audio plays via <audio>. -->
+      <video id="avatar" autoplay playsinline></video>
+      <audio id="avatar-audio" autoplay></audio>
+    </div>
+    <div id="status">connecting…</div>
+
+    <script type="module">
+      // Recall's browser loads this page with internet access, so a CDN import is
+      // fine here (this is a hosted page, not a sandboxed artifact).
+      import {
+        Room,
+        RoomEvent,
+        Track,
+        createLocalAudioTrack,
+      } from 'https://cdn.jsdelivr.net/npm/livekit-client@2/dist/livekit-client.esm.mjs';
+
+      const params = new URLSearchParams(location.search);
+      const url = params.get('lk');       // wss://…livekit.cloud
+      const token = params.get('token');  // scoped viewer JWT minted by dispatch.py
+      const statusEl = document.getElementById('status');
+      const setStatus = (t) => { statusEl.textContent = t; };
+
+      if (!url || !token) {
+        setStatus('missing ?lk= and ?token= query params');
+        throw new Error('missing lk/token');
+      }
+
+      const room = new Room({ adaptiveStream: false, dynacast: false });
+
+      // Render the avatar's media as it arrives.
+      room.on(RoomEvent.TrackSubscribed, (track) => {
+        if (track.kind === Track.Kind.Video) {
+          track.attach(document.getElementById('avatar'));
+          setStatus('live');
+        } else if (track.kind === Track.Kind.Audio) {
+          track.attach(document.getElementById('avatar-audio'));
+        }
+      });
+      room.on(RoomEvent.Disconnected, () => setStatus('disconnected'));
+
+      await room.connect(url, token);
+      setStatus('connected — publishing meeting audio');
+
+      // Publish the meeting audio into the room so the agent's STT can hear it.
+      // Inside Recall's bot browser, getUserMedia({audio}) yields the meeting's
+      // mixed audio (Recall pipes the call audio to the page's input device).
+      try {
+        const mic = await createLocalAudioTrack();
+        await room.localParticipant.publishTrack(mic);
+      } catch (err) {
+        setStatus('connected — could not capture meeting audio: ' + err.message);
+      }
+    </script>
+  </body>
+</html>
