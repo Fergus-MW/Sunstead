@@ -1,0 +1,97 @@
+name: sunstead-agent-system
+
+# Aiven-targeted compose: drops the in-network redpanda and points runner /
+# planner / gateway / sites at Aiven Kafka via mTLS. Use this when deploying
+# the agent suite anywhere with no local Kafka (e.g. an EC2 host with a
+# Cloudflare Tunnel fronting the gateway).
+#
+# Required files (next to this compose):
+#   .env             secrets and config (KAFKA_*, ANTHROPIC_API_KEY, AIVEN_TOKEN…)
+#   ca.pem           Aiven project CA cert (verify_with from service connection info)
+#   service.cert     Aiven mTLS client cert
+#   service.key      Aiven mTLS client private key
+#
+# Required env (see .env.example in the repo root for the full list):
+#   KAFKA_BOOTSTRAP=<svc>-<project>.aivencloud.com:<port>
+#   KAFKA_SECURITY=SSL
+#   KAFKA_CA_PATH=/app/ca.pem
+#   KAFKA_CERT_PATH=/app/service.cert
+#   KAFKA_KEY_PATH=/app/service.key
+#   KAFKA_PARTITIONS=3
+#   KAFKA_RF=3
+#
+# Notes
+# - Aiven services with SASL disabled (the default "certificate" auth method)
+#   require SSL/mTLS — do NOT use SASL_SSL even if the service exposes a
+#   username/password; the connection will silently close.
+# - Aiven auto-create is off; the `topics` service runs once at startup to
+#   create them idempotently. If the topics already exist it exits 0 and the
+#   other services proceed.
+
+x-secrets-mount: &secrets
+  - ./ca.pem:/app/ca.pem:ro
+  - ./service.cert:/app/service.cert:ro
+  - ./service.key:/app/service.key:ro
+
+services:
+  topics:
+    build: .
+    image: sunstead/agent-suite:dev
+    env_file: [.env]
+    volumes: *secrets
+    command: ["python", "infra/kafka_admin.py"]
+    restart: "no"
+
+  runner:
+    image: sunstead/agent-suite:dev
+    env_file: [.env]
+    volumes:
+      - ./ca.pem:/app/ca.pem:ro
+      - ./service.cert:/app/service.cert:ro
+      - ./service.key:/app/service.key:ro
+      - sites-data:/app/.sites
+      - sessions-data:/app/.sessions
+    command: ["python", "-m", "agent_runner"]
+    restart: unless-stopped
+    depends_on:
+      topics:
+        condition: service_completed_successfully
+
+  planner:
+    image: sunstead/agent-suite:dev
+    env_file: [.env]
+    volumes: *secrets
+    command: ["python", "-m", "agent_runner.planner"]
+    restart: unless-stopped
+    depends_on:
+      topics:
+        condition: service_completed_successfully
+
+  gateway:
+    image: sunstead/agent-suite:dev
+    env_file: [.env]
+    volumes: *secrets
+    command: ["python", "-m", "agent_runner.gateway"]
+    ports:
+      - "8800:8800"
+    restart: unless-stopped
+    depends_on:
+      topics:
+        condition: service_completed_successfully
+
+  sites:
+    image: sunstead/agent-suite:dev
+    env_file: [.env]
+    volumes:
+      - ./ca.pem:/app/ca.pem:ro
+      - ./service.cert:/app/service.cert:ro
+      - ./service.key:/app/service.key:ro
+      - sites-data:/app/.sites
+    command: ["python", "scripts/serve_sites.py"]
+    ports:
+      - "8810:8810"
+    restart: unless-stopped
+
+volumes:
+  sites-data:
+  sessions-data:
