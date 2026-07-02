@@ -15,7 +15,7 @@ locals {
   # code: the agent image is built from src/ + Dockerfile; the dispatch (Lambda)
   # image from src/ + deploy/Dockerfile.lambda. Both share the Python deps.
   agent_src_hash = substr(sha1(join("", concat(
-    [for f in fileset(local.repo_root, "src/**") : filesha1("${local.repo_root}/${f}")],
+    [for f in fileset(local.repo_root, "src/**") : filesha1("${local.repo_root}/${f}") if !strcontains(f, "__pycache__")],
     [
       filesha1("${local.repo_root}/Dockerfile"),
       filesha1("${local.repo_root}/pyproject.toml"),
@@ -24,7 +24,7 @@ locals {
   ))), 0, 12)
 
   dispatch_src_hash = substr(sha1(join("", concat(
-    [for f in fileset(local.repo_root, "src/**") : filesha1("${local.repo_root}/${f}")],
+    [for f in fileset(local.repo_root, "src/**") : filesha1("${local.repo_root}/${f}") if !strcontains(f, "__pycache__")],
     [
       filesha1("${local.repo_root}/deploy/Dockerfile.lambda"),
       filesha1("${local.repo_root}/pyproject.toml"),

@@ -38,16 +38,23 @@ from .tools import BASE_TOOLS, delegate
 load_dotenv()
 logger = logging.getLogger("avatar-agent")
 
-# Base persona — read the KG, capture action items, stay conversational.
+# Base persona — addressed-only, read the KG, capture action items, stay conversational.
+# {name} is filled with the bot's display name (cfg.bot_name) so the address gate and
+# the on-screen participant name always match.
 _BASE_INSTRUCTIONS = (
-    "You are Sunstead, a helpful AI teammate present as a live video avatar in a "
-    "meeting. You can see the conversation transcript and speak back into the call. "
-    "Keep replies short and conversational — one or two sentences — since people are "
-    "listening, not reading. Do not use markdown, emojis, or special characters. "
-    "When someone asks about company data — people, projects, tasks, code, documents, "
-    "or recent activity — use your tools to look it up before answering, and speak the "
-    "result naturally. Only record an action item when you are explicitly asked to "
-    "capture a task or follow-up. "
+    "You are {name}, a helpful AI teammate present as a live video avatar in a "
+    "meeting. You can hear the conversation and speak back into the call.\n"
+    "ONLY respond when you are addressed directly — when someone says your name "
+    '("{name}") or clearly directs a question or request at you. If the participants '
+    "are talking among themselves and you were not addressed, call the skip_turn tool "
+    "to stay silent: do not reply, do not interject, do not narrate, do not greet. "
+    "When you are unsure whether you were addressed, call skip_turn.\n"
+    "When you ARE addressed, keep replies short and conversational — one or two "
+    "sentences — since people are listening, not reading. Do not use markdown, emojis, "
+    "or special characters. When someone asks about company data — people, projects, "
+    "tasks, code, documents, or recent activity — use your tools to look it up before "
+    "answering, and speak the result naturally. Only record an action item when you are "
+    "explicitly asked to capture a task or follow-up. "
 )
 # Default (planner is the single brain): the team picks up build/do requests from the
 # transcript automatically, so the avatar just acknowledges them out loud.
@@ -62,11 +69,18 @@ _DELEGATE_CLAUSE = (
     "investigation, a data analysis — use the delegate tool to hand it to the specialist "
     "team, and say you're on it; the result shows up on their dashboard. "
 )
+# Known facts the avatar should state when asked (demo context).
+_FACTS_CLAUSE = (
+    "Known facts to use when they come up: the streaming bug was fixed last week. "
+    "If anyone asks whether the website is done, say that you are building it right now. "
+)
 _TAIL = "If a tool fails, say so briefly and carry on; never invent data you couldn't retrieve."
 
 
 def _instructions(cfg: Settings) -> str:
-    return _BASE_INSTRUCTIONS + (_DELEGATE_CLAUSE if cfg.avatar_delegates else _PLANNER_CLAUSE) + _TAIL
+    base = _BASE_INSTRUCTIONS.format(name=cfg.bot_name)
+    clause = _DELEGATE_CLAUSE if cfg.avatar_delegates else _PLANNER_CLAUSE
+    return base + clause + _FACTS_CLAUSE + _TAIL
 
 # Silero VAD is expensive to construct; cache it across jobs in the worker
 # process (effectively a prewarm after the first session). Cascade mode only.
